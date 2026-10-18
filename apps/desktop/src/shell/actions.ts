@@ -152,8 +152,18 @@ export function markGuildRead(guildId: Snowflake): Promise<void> {
 export async function markGuildsRead(guildIds: readonly Snowflake[]): Promise<void> {
   const state = appStore.getState();
   const wanted = new Set(guildIds);
-  const read_states = Object.values(state.channels)
-    .filter(c => c.guild_id != null && wanted.has(c.guild_id) && (c.type === ChannelType.GuildText || c.type === ChannelType.GuildAnnouncement || c.type === ChannelType.GuildVoice) && c.last_message_id && isChannelUnread(state, c.id))
+  const ids = Object.values(state.channels)
+    .filter(c => c.guild_id != null && wanted.has(c.guild_id) && (c.type === ChannelType.GuildText || c.type === ChannelType.GuildAnnouncement || c.type === ChannelType.GuildVoice))
+    .map(c => c.id);
+  await markChannelsRead(ids);
+}
+
+/** Mark these channels read up to their latest message, skipping ones already read, in bulk acks of 100 (Inbox > Unreads "Mark All as Read"). */
+export async function markChannelsRead(channelIds: readonly Snowflake[]): Promise<void> {
+  const state = appStore.getState();
+  const read_states = channelIds
+    .map(id => state.channels[id])
+    .filter((c): c is NonNullable<typeof c> => !!c?.last_message_id && isChannelUnread(state, c.id))
     .map(c => ({ channel_id: c.id, message_id: c.last_message_id as Snowflake }));
   for (let i = 0; i < read_states.length; i += 100) await request<void>("POST", "/read-states/ack-bulk", { read_states: read_states.slice(i, i + 100) });
 }

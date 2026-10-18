@@ -591,6 +591,149 @@ button.full-profile-row:hover {
   font-size: 14px;
 }
 
+/* Inbox > Unreads (shell/InboxUnreads.tsx): a card per channel, header row then its newest unread messages */
+.inbox-unread-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px 8px;
+}
+
+.inbox-unread-bar .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inbox-unread {
+  margin-bottom: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--background-base-lower);
+  overflow: hidden;
+}
+
+.inbox-unread-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.inbox-unread-open {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: var(--text-default);
+  text-align: left;
+}
+
+.inbox-unread-open:hover .inbox-row-name {
+  text-decoration: underline;
+}
+
+.inbox-unread-avatar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  color: var(--interactive-icon-default);
+}
+
+.inbox-unread-avatar .guild-icon {
+  border-radius: 10px;
+}
+
+.inbox-unread-open .inbox-row-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-strong);
+}
+
+.inbox-unread-open .inbox-row-badge {
+  margin-left: auto;
+}
+
+.inbox-unread-type {
+  flex-shrink: 0;
+  color: var(--interactive-icon-default);
+}
+
+.inbox-unread-check {
+  display: flex;
+  flex-shrink: 0;
+  padding: 6px;
+  border-radius: 50%;
+  background: var(--background-mod-normal);
+  color: var(--interactive-icon-default);
+}
+
+.inbox-unread-check:hover {
+  background: var(--background-mod-strong);
+  color: var(--interactive-icon-hover);
+}
+
+.inbox-unread-messages {
+  padding: 4px 0;
+}
+
+.inbox-unread-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 6px 12px;
+  color: var(--text-default);
+  text-align: left;
+}
+
+.inbox-unread-message:hover {
+  background: var(--interactive-background-hover);
+}
+
+.inbox-unread-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.inbox-unread-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.inbox-unread-author {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.inbox-unread-text {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow-wrap: anywhere;
+}
+
+.inbox-unread-loading,
+.inbox-unread-more {
+  padding: 8px 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.inbox-unread-more {
+  text-align: center;
+}
+
 /* ---- quick switcher protip ---- */
 .quick-tip kbd {
   padding: 0 4px;
