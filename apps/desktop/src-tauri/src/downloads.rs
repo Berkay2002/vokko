@@ -4,17 +4,21 @@
 //! produced; a frame or a script that asks for an `http(s):`, `data:` or foreign `blob:` download is refused.
 
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use tauri::webview::DownloadEvent;
 use tauri::{Emitter, Manager, Runtime, Url, Webview};
 
 pub const DOWNLOAD_EVENT: &str = "desktop-download";
-const MAX_NAME_BYTES: usize = 200;
+/// Windows MAX_PATH is 260: room for the Downloads folder, a `_` prefix, " (999)" and ".download".
+const MAX_NAME_BYTES: usize = 150;
 /// Files the OS would run, install, mount or open with macros on a double click. They are still saved, but under `<name>.download`,
 /// so opening one takes a deliberate rename instead of a click on a name the sender chose.
 const RUNNABLE: &[&str] = &[
     "app",
     "appimage",
+    "appinstaller",
     "applescript",
     "application",
     "appref-ms",
@@ -32,6 +36,7 @@ const RUNNABLE: &[&str] = &[
     "dll",
     "dmg",
     "docm",
+    "dotm",
     "exe",
     "fileloc",
     "gadget",
@@ -53,18 +58,24 @@ const RUNNABLE: &[&str] = &[
     "msix",
     "msixbundle",
     "msp",
+    "msu",
     "pif",
     "pkg",
+    "ppam",
     "pptm",
     "ps1",
     "ps1xml",
     "psm1",
+    "py",
+    "pyw",
+    "pyz",
     "reg",
     "rpm",
     "run",
     "scf",
     "scpt",
     "scr",
+    "sct",
     "search-ms",
     "settingcontent-ms",
     "sh",
@@ -77,9 +88,12 @@ const RUNNABLE: &[&str] = &[
     "webloc",
     "workflow",
     "ws",
+    "wsc",
     "wsf",
     "wsh",
+    "xlam",
     "xll",
+    "xlsb",
     "xlsm",
 ];
 
@@ -93,14 +107,14 @@ struct Finished {
     success: bool,
 }
 
-/// Windows device names, with or without an extension: CON, PRN, AUX, NUL, CONIN$, CONOUT$ and COM1-9 / LPT1-9 (superscript digits too).
+/// Windows device names, with or without an extension: CON, PRN, AUX, NUL, CONIN$, CONOUT$ and COM0-9 / LPT0-9 (superscript digits too).
 fn is_reserved(stem: &str) -> bool {
     let stem = stem.trim_end_matches(' ').to_ascii_uppercase();
     if matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$") {
         return true;
     }
     let chars: Vec<char> = stem.chars().collect();
-    chars.len() == 4 && (stem.starts_with("COM") || stem.starts_with("LPT")) && matches!(chars[3], '1'..='9' | '¹' | '²' | '³')
+    chars.len() == 4 && (stem.starts_with("COM") || stem.starts_with("LPT")) && matches!(chars[3], '0'..='9' | '¹' | '²' | '³')
 }
 
 /// A file name that is safe to create in the Downloads folder: no directories, no characters Windows rejects, no reserved device
@@ -146,6 +160,18 @@ fn is_own_blob(download: &Url, own: &Url) -> bool {
     matches!((origin_string(&inner), origin_string(own)), (Some(a), Some(b)) if a == b)
 }
 
+/// Empty files `claim` created for downloads still running (Windows), by download URL. wry reports no path for a failed download, so
+/// this is how the placeholder is found again.
+static CLAIMED: Mutex<BTreeMap<String, PathBuf>> = Mutex::new(BTreeMap::new());
+
+/// A download ended: forget its placeholder and, when it failed and nothing was written, remove it.
+fn release(url: &Url, success: bool) {
+    let Some(path) = CLAIMED.lock().ok().and_then(|mut claimed| claimed.remove(url.as_str())) else { return };
+    if !success && std::fs::metadata(&path).is_ok_and(|meta| meta.len() == 0) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
 /// Takes `path` if nothing is there. On Windows the file is created empty so two downloads cannot pick the same name; on macOS an
 /// existing file makes WKDownload fail, so the check only looks. A dangling symlink counts as taken.
 #[cfg(windows)]
@@ -177,10 +203,16 @@ pub fn on_download<R: Runtime>(webview: Webview<R>, event: DownloadEvent<'_>) ->
             let Ok(dir) = webview.path().download_dir() else { return false };
             let suggested = destination.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
             let Some(path) = free_path(&dir, &clean_name(&suggested), claim) else { return false };
+            if cfg!(windows)
+                && let Ok(mut claimed) = CLAIMED.lock()
+            {
+                claimed.insert(url.as_str().to_owned(), path.clone());
+            }
             *destination = path;
             true
         }
-        DownloadEvent::Finished { success, .. } => {
+        DownloadEvent::Finished { url, success, .. } => {
+            release(&url, success);
             if let Err(error) = webview.emit(DOWNLOAD_EVENT, Finished { success }) {
                 log::warn!("could not report a finished download: {error}");
             }
@@ -216,6 +248,8 @@ mod tests {
         assert_eq!(clean_name("CONIN$"), "_CONIN$");
         assert_eq!(clean_name("nul .txt"), "_nul .txt");
         assert_eq!(clean_name("COM10"), "COM10");
+        assert_eq!(clean_name("COM0"), "_COM0");
+        assert_eq!(clean_name("lpt0.txt"), "_lpt0.txt");
     }
 
     #[test]
@@ -297,6 +331,17 @@ mod tests {
             "docm",
             "xlsm",
             "pptm",
+            "py",
+            "pyw",
+            "pyz",
+            "msu",
+            "appinstaller",
+            "wsc",
+            "sct",
+            "xlam",
+            "xlsb",
+            "dotm",
+            "ppam",
         ] {
             assert_eq!(clean_name(&format!("file.{ext}")), format!("file.{ext}.download"), "{ext}");
             assert_eq!(clean_name(&format!("file.{}", ext.to_uppercase())), format!("file.{}.download", ext.to_uppercase()), "{ext} upper");
@@ -320,7 +365,7 @@ mod tests {
         assert_eq!(name.len(), MAX_NAME_BYTES);
         assert!(name.chars().all(|c| c == 'é'));
         let odd = clean_name(&format!("a{}", "é".repeat(300)));
-        assert_eq!(odd.len(), 199); // 1 + 99 * 2: the 100th é would end at 201
+        assert_eq!(odd.len(), 149); // 1 + 74 * 2: the 75th é would end at 151
     }
 
     #[test]
@@ -347,6 +392,27 @@ mod tests {
             std::os::unix::fs::symlink(dir.join("missing"), &link).expect("symlink");
             assert!(!claim(&link));
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_download_removes_its_empty_placeholder_only() {
+        let dir = std::env::temp_dir().join(format!("vokko-release-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let (empty, written, done) = (dir.join("empty"), dir.join("written"), dir.join("done"));
+        std::fs::write(&empty, b"").expect("empty");
+        std::fs::write(&written, b"x").expect("written");
+        std::fs::write(&done, b"").expect("done");
+        let url = |id: &str| Url::parse(&format!("blob:tauri://localhost/{id}")).expect("url");
+        for (id, path) in [("a", &empty), ("b", &written), ("c", &done)] {
+            CLAIMED.lock().expect("lock").insert(url(id).as_str().to_owned(), path.clone());
+        }
+        release(&url("a"), false);
+        release(&url("b"), false);
+        release(&url("c"), true);
+        release(&url("unknown"), false);
+        assert!(!empty.exists() && written.exists() && done.exists());
+        assert!(CLAIMED.lock().expect("lock").is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

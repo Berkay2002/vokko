@@ -84,6 +84,18 @@ test.describe('desktop 1440x900', () => {
     expect((await again).suggestedFilename()).toBe('saved-chart.png');
   });
 
+  test('a text file preview downloads through a saved blob, from the button and from the whole-file dialog', async ({ page }) => {
+    await openStockTalk(page);
+    const row = await sendFiles(page, [{ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('one\ntwo\nthree\n') }], 'some notes');
+    const first = page.waitForEvent('download');
+    await row.getByRole('link', { name: 'Download notes.txt' }).click();
+    expect((await first).suggestedFilename()).toBe('notes.txt');
+    await row.getByRole('button', { name: 'View whole file' }).click();
+    const second = page.waitForEvent('download');
+    await page.getByRole('dialog').getByRole('link', { name: 'Download' }).click();
+    expect((await second).suggestedFilename()).toBe('notes.txt');
+  });
+
   test('Copy Image falls back to the link where the clipboard has no picture support', async ({ page }) => {
     await page.addInitScript(() => { delete (window as unknown as { ClipboardItem?: unknown }).ClipboardItem; });
     await openStockTalk(page);

@@ -11,12 +11,9 @@ import { formatBytes, formatFullDate, formatMessageTimestamp, isSpoilerName } fr
 import { VoicePlayer, isVoiceMessage } from './VoiceMessage';
 import { TextPreview } from './TextPreview';
 import { isTextPreviewable } from './textAttachment';
-import { saveMedia } from './mediaActions';
+import { saveOnClick } from './mediaActions';
 import { RESET, type View } from './lightboxZoom';
 import { useViewerGestures } from './useViewerGestures';
-
-/** Click handler for a Download link: saves through `saveMedia` (a blob, so it also works for a file on another origin and in the desktop shell). */
-const saveOnClick = (url: string, filename: string) => (e: React.MouseEvent) => { e.preventDefault(); void saveMedia(url, filename); };
 
 export const isImage = (a: Attachment): boolean => !!a.content_type?.startsWith('image/') || /\.(png|jpe?g|gif|webp|avif|svg|bmp)$/i.test(a.filename);
 const isVideo = (a: Attachment): boolean => !!a.content_type?.startsWith('video/');

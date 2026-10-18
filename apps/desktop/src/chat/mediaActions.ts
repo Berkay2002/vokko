@@ -1,3 +1,4 @@
+import type { MouseEvent } from 'react';
 import { onDesktopEvent } from '../desktop/tauri';
 import { chatToast } from './toast';
 
@@ -34,6 +35,12 @@ export async function saveMedia(url: string, filename: string): Promise<void> {
   link.click();
   setTimeout(() => URL.revokeObjectURL(href), 60_000);
 }
+
+/** Click handler for a Download link: saves through `saveMedia` (a blob, so it also works for a file on another origin and in the desktop shell). */
+export const saveOnClick = (url: string, filename: string) => (e: MouseEvent) => {
+  e.preventDefault();
+  void saveMedia(url, filename);
+};
 
 /** Re-encodes any picture the browser can decode as PNG, the one image type every clipboard accepts. */
 async function toPng(blob: Blob): Promise<Blob> {

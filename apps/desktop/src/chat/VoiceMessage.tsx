@@ -3,6 +3,7 @@ import { ArrowUp, Download, Mic, Pause, Play, Trash2 } from 'lucide-react';
 import { MessageFlags } from '../api/types';
 import type { Attachment, Message, Snowflake, User } from '../api/types';
 import { Tooltip, resolveUrl, uploadAttachment } from './shell';
+import { saveOnClick } from './mediaActions';
 import { messageStore } from './messageStore';
 import { chatToast } from './toast';
 import { uploadErrorMessage } from './util';
@@ -276,7 +277,7 @@ export function VoicePlayer({ attachment }: { attachment: Attachment }) {
       <button type="button" className="voice-player-speed" aria-label={`Playback speed ${speed}x`} onClick={() => setSpeed(s => SPEEDS[(SPEEDS.indexOf(s) + 1) % SPEEDS.length]!)}>{speed}x</button>
     </Tooltip>
     <Tooltip content="Download" side="top">
-      <a className="voice-player-download" href={url} download={attachment.filename} aria-label="Download voice message"><Download size={18} /></a>
+      <a className="voice-player-download" href={url} download={attachment.filename} onClick={saveOnClick(url, attachment.filename)} aria-label="Download voice message"><Download size={18} /></a>
     </Tooltip>
   </div>;
 }

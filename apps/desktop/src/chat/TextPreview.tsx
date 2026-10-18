@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown, ChevronUp, Download, Maximize2 } from 'lucide-react';
 import type { Attachment } from '../api/types';
 import { highlightIfLoaded, useHighlighterLoaded } from './markdown/highlighter';
+import { saveOnClick } from './mediaActions';
 import { Modal, Tooltip, resolveUrl } from './shell';
 import { formatBytes } from './util';
 import { COLLAPSED_LINES, EXPANDED_LINES, PREVIEW_MAX_FILE, PREVIEW_PREFIX_BYTES, firstLines, languageOf, loadText, type LoadedText } from './textAttachment';
@@ -62,7 +63,7 @@ export function TextPreview({ attachment, children }: { attachment: Attachment; 
         <button type="button" className="chat-text-preview-btn" aria-label="View whole file" onClick={() => setWhole(true)}><Maximize2 size={20} /></button>
       </Tooltip>
       <Tooltip content="Download" side="top">
-        <a className="chat-text-preview-btn" href={url} download={attachment.filename} aria-label={`Download ${attachment.filename}`}><Download size={20} /></a>
+        <a className="chat-text-preview-btn" href={url} download={attachment.filename} onClick={saveOnClick(url, attachment.filename)} aria-label={`Download ${attachment.filename}`}><Download size={20} /></a>
       </Tooltip>
     </div>
     {whole && <WholeFile attachment={attachment} url={url} lang={lang} onClose={() => setWhole(false)} />}
@@ -80,7 +81,7 @@ function WholeFile({ attachment, url, lang, onClose }: { attachment: Attachment;
   const body = useHighlighted(text?.shown ?? '', lang);
   const gutter = useMemo(() => (text ? Array.from({ length: text.total }, (_, i) => i + 1).join('\n') : ''), [text?.total]); // eslint-disable-line react-hooks/exhaustive-deps
   return <Modal open onClose={onClose} title={attachment.filename} className="modal-large chat-text-modal"
-    footer={<a className="chat-btn primary" href={url} download={attachment.filename}><Download size={16} /> Download</a>}>
+    footer={<a className="chat-btn primary" href={url} download={attachment.filename} onClick={saveOnClick(url, attachment.filename)}><Download size={16} /> Download</a>}>
     {file === undefined && <p className="chat-text-modal-status">Loading…</p>}
     {file === null && <p className="chat-text-modal-status">This file can't be previewed.</p>}
     {text && <div className="chat-text-modal-code" tabIndex={0} role="region" aria-label={`Contents of ${attachment.filename}`}>
