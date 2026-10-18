@@ -5632,7 +5632,8 @@ mod tests {
         round_trip::<ReadyEvent>(json!({
             "v": 1, "user": user(), "session_id": "abc", "guilds": [with_state], "private_channels": [], "presences": [], "read_states": [], "relationships": [],
             "guild_layout": {"guild_folders": [{"id": "9", "name": "games", "color": 5793266, "guild_ids": ["300"]}], "guild_positions": ["300"]},
-            "media": {"voice_enabled": true, "voice_bitrate_ceiling": 128000, "screenshare_qualities": ["720p30", "1080p60"], "video_enabled": false}
+            "media": {"voice_enabled": true, "voice_bitrate_ceiling": 128000, "screenshare_qualities": ["720p30", "1080p60"], "video_enabled": false},
+            "max_upload_bytes": 524288000
         }));
         round_trip::<GuildMemberAdd>(
             json!({"user": user(), "nick": null, "roles": [], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": "2026-10-12T10:00:00.000Z", "avatar": null, "banner": null, "bio": null, "pronouns": null, "theme_colors": null, "guild_id": "300"}),
