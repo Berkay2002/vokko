@@ -1983,6 +1983,8 @@ export interface EditChannelRequest {
   // ---- voice channels (MANAGE_CHANNELS) ----
   bitrate?: number; // 8000..guild max (else 400 50035)
   user_limit?: number; // 0..99
+  // ---- group DMs (any recipient) ----
+  icon_attachment_id?: Snowflake | null; // an own PNG/JPEG/GIF/WebP upload (<= 10 MiB) becomes the group icon; null removes it
 }
 export interface CreateChannelRequest {
   name: string;

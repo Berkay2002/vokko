@@ -2972,6 +2972,9 @@ pub struct UpdateChannelRequest {
     /// Slowmode seconds (0..=21600); guild text and voice channels only (MANAGE_CHANNELS).
     #[serde(default)]
     pub rate_limit_per_user: Option<u32>,
+    /// Group DMs only: an uploaded PNG/JPEG/GIF/WebP becomes the group icon; `null` removes it.
+    #[serde(default, deserialize_with = "double_option")]
+    pub icon_attachment_id: Option<Option<Snowflake>>,
     // ---- threads ----
     #[serde(default)]
     pub archived: Option<bool>,

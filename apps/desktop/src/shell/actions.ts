@@ -132,6 +132,17 @@ export async function addGroupRecipients(channelId: Snowflake, userIds: Snowflak
   for (const id of userIds) await request<void>("PUT", `/channels/${channelId}/recipients/${id}`);
 }
 
+/** The group owner removes someone (or anyone removes themselves, which is leaving). */
+export async function removeGroupRecipient(channelId: Snowflake, userId: Snowflake): Promise<void> {
+  await request<void>("DELETE", `/channels/${channelId}/recipients/${userId}`);
+}
+
+/** Renames a group DM and/or sets (an upload id) or clears (null) its icon. */
+export async function editGroup(channelId: Snowflake, body: { name?: string; icon_attachment_id?: Snowflake | null }): Promise<void> {
+  appStore.getState().upsertChannel(await request<Channel>("PATCH", `/channels/${channelId}`, body));
+}
+
+/** Closes a 1:1 DM; for a group DM this leaves the group (callers confirm first: "leaveGroup" modal). */
 export async function closeDirectMessage(channelId: Snowflake): Promise<void> {
   await request<Channel>("DELETE", `/channels/${channelId}`);
   appStore.getState().removeChannel(channelId);

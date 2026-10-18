@@ -104,8 +104,13 @@ export function ChannelStart() {
     </div>;
   }
   if (ch && ch.type === ChannelType.GroupDM) {
-    const names = (ch.recipients ?? []).map(u => chat.nameOf(u)).join(', ');
-    return <div className="chat-start"><h2 className="chat-start-title">{names}</h2><p>Welcome to the beginning of the group.</p></div>;
+    const name = ch.name || (ch.recipients ?? []).map(u => chat.nameOf(u)).join(', ');
+    return <div className="chat-start">
+      {ch.icon && <img className="chat-start-avatar group-icon" src={resolveUrl(ch.icon)} alt="" width={80} height={80} />}
+      <h2 className="chat-start-title">{name}</h2>
+      <p>Welcome to the beginning of the <b>{name}</b> group.</p>
+      <button type="button" className="chat-start-edit" onClick={() => openModal({ type: 'editGroup', channelId: ch.id })}><Pencil size={16} /> Edit Group</button>
+    </div>;
   }
   if (ch && isThreadType(ch.type)) return <ThreadStart thread={ch} />;
   // Text-in-voice: a speech bubble and the bare channel name (no hash).

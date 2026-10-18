@@ -427,6 +427,15 @@ route("PATCH", `/channels/${ID}`, ({ viewer, params, body }) => {
   if (isThreadType(channel.type) && typeof body.nsfw === "boolean") fail(400, 50035, "Invalid Form Body", { nsfw: { code: "INVALID", message: "This channel type cannot be age-restricted." } });
   if (isThreadType(channel.type)) return editThread(channel, viewer.user.id, body);
   if (channel.guild_id) requireChannelPerm(channel, viewer.user.id, Perm.MANAGE_CHANNELS);
+  if ("icon_attachment_id" in body && channel.type !== ChannelType.GroupDM) fail(403, 50013, "Missing Permissions");
+  // Group DMs (any recipient): the name as typed (empty clears it) and the icon, like the server.
+  if (channel.type === ChannelType.GroupDM) {
+    if (typeof body.name === "string") channel.name = body.name.trim() || null;
+    if ("icon_attachment_id" in body) channel.icon = body.icon_attachment_id ? (pendingAttachment(str(body.icon_attachment_id), viewer.user.id)?.url ?? null) : null;
+    const payload = channelFor(channel, viewer.user.id);
+    emit(channelAudience(channel), "CHANNEL_UPDATE", payload);
+    return payload;
+  }
   const snapshot = { ...channel };
   applyChannelFields(channel, body);
   if (typeof body.name === "string") {
