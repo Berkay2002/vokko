@@ -210,6 +210,7 @@ impl Live {
                         }
                         if let Some(p) = &self.pipeline {
                             p.reported(self.current_ms());
+                            p.log_stats(&self.channel_id);
                         }
                         self.log_cache();
                     }
