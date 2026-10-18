@@ -298,12 +298,25 @@ fn playlist_summary(raw: ApiPlaylist) -> Option<SpotifyPlaylistSummary> {
     })
 }
 
+/// One more attempt when `send` fails (a timeout, or a refused or dropped connection): a single network stall shouldn't fail the
+/// request. An HTTP answer, whatever its status, is returned as is.
+async fn send_twice(request: reqwest::RequestBuilder, what: &str) -> Result<reqwest::Response, CatalogError> {
+    for _ in 0..2 {
+        let Some(attempt) = request.try_clone() else { break };
+        match attempt.send().await {
+            Ok(response) => return Ok(response),
+            Err(error) => tracing::warn!("spotify: {what} failed ({})", if error.is_timeout() { "timeout" } else { "connection" }),
+        }
+    }
+    Err(CatalogError::Unavailable)
+}
+
 impl Catalog {
     pub fn new(cfg: &SpotifyConfig) -> Self {
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(Duration::from_secs(3))
-            .timeout(Duration::from_secs(8))
+            .timeout(cfg.request_timeout)
             .build()
             .unwrap_or_default();
         Self {
@@ -354,18 +367,13 @@ impl Catalog {
             return Ok(token.clone());
         }
         let basic = STANDARD.encode(format!("{}:{}", self.client_id, self.client_secret.expose()));
-        let response = self
+        let request = self
             .client
             .post(format!("{}/api/token", self.accounts_url))
             .header(reqwest::header::AUTHORIZATION, format!("Basic {basic}"))
             .header(reqwest::header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-            .body("grant_type=client_credentials")
-            .send()
-            .await
-            .map_err(|error| {
-                tracing::warn!("spotify: the token request failed ({})", if error.is_timeout() { "timeout" } else { "connection" });
-                CatalogError::Unavailable
-            })?;
+            .body("grant_type=client_credentials");
+        let response = send_twice(request, "the token request").await?;
         if response.status().as_u16() == 429 {
             return Err(self.pause(&response));
         }
@@ -387,10 +395,7 @@ impl Catalog {
         for attempt in 0..2 {
             self.check_paused()?;
             let token = self.token().await?;
-            let response = self.client.get(url.clone()).bearer_auth(&token).send().await.map_err(|error| {
-                tracing::warn!("spotify: a catalog request failed ({})", if error.is_timeout() { "timeout" } else { "connection" });
-                CatalogError::Unavailable
-            })?;
+            let response = send_twice(self.client.get(url.clone()).bearer_auth(&token), "a catalog request").await?;
             match response.status().as_u16() {
                 200..=299 => {
                     if response.content_length().is_some_and(|length| length > BODY_MAX) {

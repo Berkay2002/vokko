@@ -152,6 +152,8 @@ pub struct SpotifyConfig {
     /// Spotify's Web API and token endpoints (tests point them at a mock).
     pub api_url: String,
     pub accounts_url: String,
+    /// Total time for one request to Spotify (tests shorten it); a request that fails to get any answer is tried once more.
+    pub request_timeout: Duration,
     /// The bot drops a session not renewed for 150 s, so the server re-sends its `PUT` this often.
     pub lease_interval: Duration,
     /// How often the session is checked for lease, pause timeout, error hold and notice expiry.
@@ -187,6 +189,7 @@ impl SpotifyConfig {
             pause_timeout: Duration::from_secs(15 * 60),
             api_url: "https://api.spotify.com".to_owned(),
             accounts_url: "https://accounts.spotify.com".to_owned(),
+            request_timeout: Duration::from_secs(8),
             lease_interval: Duration::from_secs(60),
             tick: Duration::from_secs(1),
             error_hold: Duration::from_secs(30),
