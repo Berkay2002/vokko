@@ -53,6 +53,11 @@ jobs:
         run: cargo test -p vokko-server -p vokko-protocol -p vokko-engine -p vokko-platform -p vokko-cli
       - name: layers
         run: cargo xtask layers
+      # Skips itself when the secret is unset (forks, pull requests from forks).
+      - name: privacy
+        run: cargo xtask privacy
+        env:
+          VOKKO_PRIVACY_DENYLIST: ${{ secrets.VOKKO_PRIVACY_DENYLIST }}
 
   ui:
     runs-on: ubuntu-latest

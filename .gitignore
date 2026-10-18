@@ -15,3 +15,8 @@
 /.claude/reference/
 *.tsbuildinfo
 /apps/desktop/perf-results/
+/.private/
+/.claude/
+__pycache__/
+*.pyc
+/apps/desktop/release.production.json
