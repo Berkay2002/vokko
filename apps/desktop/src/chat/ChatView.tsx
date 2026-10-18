@@ -65,8 +65,10 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channelId]);
 
+  // Edits and deletes started from a focused message row give the focus back to that row (or its neighbour), not the composer.
   const requestDelete = useCallback((m: Message, skipConfirm: boolean) => {
-    if (skipConfirm) { void messageStore.remove(m.channel_id, m.id); return; }
+    list.current?.rememberFocus();
+    if (skipConfirm) { void messageStore.remove(m.channel_id, m.id).finally(() => list.current?.restoreFocus()); return; }
     setDeleting({ message: m });
   }, []);
 
@@ -80,7 +82,7 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
 
   const actions = useMemo<ChatActions>(() => ({
     reply: m => { setReplyTo(m); setMentionReply(true); setEditingId(null); setFocusToken(n => n + 1); },
-    edit: m => setEditingId(m.id),
+    edit: m => { list.current?.rememberFocus(); setEditingId(m.id); },
     requestDelete,
     togglePin: m => {
       // Pinning and unpinning both ask first (Shift skips the question, like deleting).
@@ -96,7 +98,7 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
     viewReactions: (m, key) => { setReactionsOf(m); setReactionsKey(key); },
   }), [channelId, requestDelete, applyPin]);
 
-  const stopEditing = useCallback(() => { setEditingId(null); setFocusToken(n => n + 1); }, []);
+  const stopEditing = useCallback(() => { setEditingId(null); if (!list.current?.restoreFocus()) setFocusToken(n => n + 1); }, []);
 
   if (!me) return null;
 
@@ -108,7 +110,7 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
       focusToken={focusToken} list={list} atBottom={atBottom} setAtBottom={setAtBottom}
       dragging={dragging} setDragging={setDragging} dragDepth={dragDepth}
     />
-    <DeleteModal request={deleting} onClose={() => { setDeleting(null); setFocusToken(n => n + 1); }} />
+    <DeleteModal request={deleting} onClose={() => { setDeleting(null); if (!list.current?.restoreFocus()) setFocusToken(n => n + 1); }} />
     <PinConfirmDialog message={pinning} onCancel={() => { setPinning(null); setFocusToken(n => n + 1); }}
       onConfirm={() => { const m = pinning; setPinning(null); setFocusToken(n => n + 1); if (m) applyPin(m); }} />
     <LinkModal href={link} onClose={() => setLink(null)} />

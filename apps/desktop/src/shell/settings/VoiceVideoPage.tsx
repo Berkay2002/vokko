@@ -1,6 +1,6 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { Camera, ChevronDown, ChevronRight, Mic, Volume2, type LucideIcon } from "lucide-react";
-import { Dropdown, Modal, resetPrefs, setPref, usePrefs, type Prefs } from "../../ui";
+import { Dropdown, Modal, resetPrefs, setPref, usePhone, usePrefs, type Prefs } from "../../ui";
 import { nativeVoice } from "../../desktop";
 import { previewSound } from "../../notify/sounds";
 import { VOICE_SOUNDS, isSoundEnabled, withSoundEnabled, type VoiceSoundId } from "../../notify/soundCatalog";
@@ -9,6 +9,7 @@ import { useMicTest } from "../../voice/micTest";
 import { PttSettings } from "../../voice/PttSettings";
 import { SoundboardVoiceSettings } from "../../soundboard";
 import { useVoice } from "../../voice/store";
+import { canShareScreen } from "../../voice/videoControls";
 import { sensitivityToDb } from "../../voice/vad";
 import { useCameraPreview } from "../../voice/video/useCameraPreview";
 import { VideoBackgroundPicker } from "../../voice/video/VideoBackgroundPicker";
@@ -200,6 +201,9 @@ export function VoiceVideoPage() {
   const ids = useId();
   // The Linux app captures in Rust: the first camera, no background (WebKit's device ids aren't V4L2 paths).
   const native = nativeVoice();
+  // A touch phone has no keyboard to hold for push to talk, and its browser cannot share a screen.
+  const touchPhone = usePhone() && window.matchMedia("(hover: none)").matches;
+  const canStream = canShareScreen();
 
   // Device names appear once a permission has been granted, which the mic test or camera test does.
   const { refresh } = devices;
@@ -218,9 +222,10 @@ export function VoiceVideoPage() {
   const custom = inputProfile === "custom";
   const noiseValue: NoiseChoice = custom ? suppressionChoice(noiseSuppression, noiseKind) : resolved.rnnoise ? "rnnoise" : resolved.noiseSuppression ? "standard" : "none";
   const pttSoundOn = PTT_SOUNDS.every(id => isSoundEnabled(disabledSounds, id));
-  const primarySounds = VOICE_SOUNDS.filter(s => s.group === "primary");
-  const moreList = VOICE_SOUNDS.filter(s => s.group === "more");
-  const shownSounds = moreSounds ? VOICE_SOUNDS : primarySounds;
+  const sounds = touchPhone ? VOICE_SOUNDS.filter(s => !PTT_SOUNDS.includes(s.id)) : VOICE_SOUNDS;
+  const primarySounds = sounds.filter(s => s.group === "primary");
+  const moreList = sounds.filter(s => s.group === "more");
+  const shownSounds = moreSounds ? sounds : primarySounds;
 
   const setSound = (id: VoiceSoundId, on: boolean) => setPref("disabledSounds", withSoundEnabled(getDisabled(), id, on));
   // Read the freshest value so toggling two sounds in a row does not overwrite the first change.
@@ -297,7 +302,8 @@ export function VoiceVideoPage() {
           </div>
         </Field>
 
-        <Field label="Input mode">
+        {/* still shown on a touch phone while Push to Talk is on (chosen at a wider size), so it can be switched back */}
+        {(!touchPhone || inputMode === "ptt") && <Field label="Input mode">
           <RadioGroup<InputModeChoice>
             name="Input mode"
             value={inputMode}
@@ -307,8 +313,8 @@ export function VoiceVideoPage() {
               { value: "ptt", label: "Push to Talk" },
             ]}
           />
-        </Field>
-        {inputMode === "ptt" && (
+        </Field>}
+        {inputMode === "ptt" && !touchPhone && (
           <>
             <PttSettings />
             <SwitchRow label="Push to talk sound" note="Plays a short sound when push to talk turns on and off." checked={pttSoundOn} onChange={on => PTT_SOUNDS.forEach(id => setSound(id, on))} />
@@ -402,6 +408,7 @@ export function VoiceVideoPage() {
             <Field label="Attenuation strength">
               <Slider label="Attenuation strength" value={attenuationStrength} min={0} max={100} disabled={!attenuation} onChange={v => setPref("streamAttenuationStrength", v)} format={v => `${v}%`} />
             </Field>
+            {canStream && <>
             <Divider />
             <div className="vv-sub-title">Default stream quality</div>
             <div className="vv-columns">
@@ -423,6 +430,7 @@ export function VoiceVideoPage() {
               </Field>
             </div>
             <SwitchRow label="Share audio" note="Include the sound of the shared window or screen." checked={streamAudio} onChange={v => setPref("streamAudio", v)} />
+            </>}
             <Field label="Watching quality">
               <Select<ViewerQuality>
                 label="Watching quality"

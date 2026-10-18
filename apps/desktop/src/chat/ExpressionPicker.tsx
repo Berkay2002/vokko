@@ -57,13 +57,3 @@ export function ExpressionPickerPopout({ anchor, open, initialTab, onClose, onPi
   if (phone) return <BottomSheet dock open={open} onClose={onClose} anchor={anchor} label="Emoji, GIFs and stickers">{picker}</BottomSheet>;
   return <Popout anchor={anchor} open={open} onClose={onClose} side="top" align="end" className="chat-composer-picker">{picker}</Popout>;
 }
-
-/** Small popout for the "Apps" button: there are no apps yet. */
-export function AppsPopout({ anchor, open, onClose }: { anchor: RefObject<HTMLElement | null>; open: boolean; onClose: () => void }) {
-  return <Popout anchor={anchor} open={open} onClose={onClose} side="top">
-    <div className="chat-apps-panel" role="dialog" aria-label="Apps">
-      <h3>Apps</h3>
-      <p>Apps aren&rsquo;t available yet.</p>
-    </div>
-  </Popout>;
-}

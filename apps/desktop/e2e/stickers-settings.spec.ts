@@ -23,7 +23,16 @@ test('upload, edit and delete a sticker in Server Settings', async ({ page }) =>
   await expect(list.locator('li')).toHaveCount(3);
   await expect(list.getByRole('heading')).toContainText('3 of 60');
 
+  await expect(settings.locator('input[type=file]')).toBeHidden(); // an Upload button, not the native file control
+  const shots = process.env.VOKKO_SHOTS;
+  if (shots) await page.screenshot({ path: `${shots}/stickers-1440.png` });
   await settings.getByLabel('Sticker file').setInputFiles({ name: 'probe.png', mimeType: 'image/png', buffer: PNG });
+  if (shots) {
+    await page.screenshot({ path: `${shots}/stickers-picked-1440.png` });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: `${shots}/stickers-picked-390.png` });
+    await page.setViewportSize({ width: 1440, height: 900 });
+  }
   await settings.getByRole('button', { name: 'Upload', exact: true }).click();
   await expect(settings.getByRole('alert')).toHaveText('The name must be 2-30 characters.'); // checked before anything is uploaded
   await settings.getByLabel('Sticker name').fill('probe');
