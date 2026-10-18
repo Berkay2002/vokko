@@ -79,7 +79,10 @@ struct World {
 
 impl World {
     async fn new() -> Self {
-        let app = TestApp::new().await;
+        Self::with_app(TestApp::new().await).await
+    }
+
+    async fn with_app(app: TestApp) -> Self {
         let (owner, user) = app.register("owner").await;
         let (guild, channel) = app.guild_with_channel(&owner).await;
         Self { app, guild, channel, owner, owner_id: user["id"].as_str().expect("id").to_owned() }
@@ -566,10 +569,36 @@ async fn verification_level_gates_new_members_without_roles() {
     let (status, _) = w.app.post(&messages, &member, json!({"content": "hello"})).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "High also needs 10 minutes of membership");
     w.age_members(1).await;
+    let (status, body) = w.app.post(&messages, &member, json!({"content": "hello"})).await;
+    assert_eq!((status, code(&body)), (StatusCode::FORBIDDEN, 50009), "and a verified email");
+    assert!(body["message"].as_str().unwrap_or_default().contains("Verify your email"), "{body}");
+    sqlx::query("UPDATE users SET email_verified = true WHERE id = $1")
+        .bind(member_id.parse::<i64>().expect("id"))
+        .execute(&w.app.state.db)
+        .await
+        .expect("verify");
     let (status, _) = w.app.post(&messages, &member, json!({"content": "hello"})).await;
     assert_eq!(status, StatusCode::OK);
+
+    // Low: only the verified email; an instance without SMTP (mails only logged) lets everyone through
+    let (status, _) = w.app.patch(&w.path(""), &w.owner, json!({"verification_level": 1})).await;
+    assert_eq!(status, StatusCode::OK);
+    let (newbie, _) = w.member("newbie").await;
+    let (status, _) = w.app.post(&messages, &newbie, json!({"content": "hello"})).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "Low needs a verified email");
+    let _ = w.owner_id;
+}
+
+#[tokio::test]
+async fn verification_level_low_without_smtp_lets_unverified_accounts_talk() {
+    let w = World::with_app(TestApp::with_config(|config| config.accounts.mail = vokko_server::account::config::MailConfig::Log).await).await;
+    let (status, _) = w.app.patch(&w.path(""), &w.owner, json!({"verification_level": 1})).await;
+    assert_eq!(status, StatusCode::OK);
+    let (member, _) = w.member("unverified").await;
+    let (status, body) = w.app.post(&format!("/channels/{}/messages", w.channel), &member, json!({"content": "hello"})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
     let (_, guild) = w.app.get(&w.path(""), &member).await;
-    assert_eq!(guild["verification_level"], 3);
+    assert_eq!(guild["verification_level"], 1);
     let (status, _) = w.app.get(&w.path(""), &w.owner).await;
     assert_eq!(status, StatusCode::OK);
     let _ = w.owner_id;

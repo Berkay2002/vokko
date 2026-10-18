@@ -214,7 +214,7 @@ impl ApiErr {
 
     /// 403 / 50009: the guild's verification level is above what the member meets.
     pub fn verification_level() -> Self {
-        Self::new(StatusCode::FORBIDDEN, 50009, "Channel verification level is too high for you to gain access")
+        Self::new(StatusCode::FORBIDDEN, 50009, "Channel verification level is too high for you to gain access. Verify your email to talk here.")
     }
 
     /// 400 / 200000: an AutoMod rule blocked the message; `errors.content` carries the rule's custom message when it has one.

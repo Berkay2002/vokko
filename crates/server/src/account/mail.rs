@@ -97,6 +97,11 @@ impl Mailer {
         }
     }
 
+    /// Whether mails reach an inbox (SMTP, or the tests' memory); false when they only go to the log.
+    pub fn delivers(&self) -> bool {
+        !matches!(self.0, Transport::Log)
+    }
+
     /// Mails kept by the in-memory transport (tests); empty for the others.
     pub fn sent(&self) -> Vec<Mail> {
         match &self.0 {

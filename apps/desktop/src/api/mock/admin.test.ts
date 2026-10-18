@@ -11,6 +11,7 @@ import { ApiRequestError } from "../errors";
 import { timestampToSnowflake } from "../snowflake";
 import { Perm } from "../permissions";
 import { AuditLogEvent, OverwriteType, type AuditLog, type AuditLogEntry, type AutoModerationRule, type Role } from "../types";
+import { accountState } from "./accounts";
 import { resetAdmin } from "./admin";
 import { db } from "./db";
 import { addMessage, createAccount, createGuildRecord } from "./ops";
@@ -179,8 +180,15 @@ describe("safety and AutoMod", () => {
     call("owner", "PATCH", `/guilds/${guildId}`, { verification_level: 2 });
     expect(errorOf(() => send("fresh", "hi")).code).toBe(50009);
     expect(() => send("plain", "hi")).not.toThrow();
+    // Low: a verified email, nothing else
+    call("owner", "PATCH", `/guilds/${guildId}`, { verification_level: 1 });
+    expect(() => send("fresh", "hi")).not.toThrow();
+    accountState(fresh).email_verified = false;
+    expect(errorOf(() => send("fresh", "hi")).code).toBe(50009);
+    accountState(fresh).email_verified = true;
+    call("owner", "PATCH", `/guilds/${guildId}`, { verification_level: 2 });
     expect(errorOf(() => call("owner", "PATCH", `/guilds/${guildId}`, { verification_level: 7 })).code).toBe(50035);
-    expect(audit(`?action_type=${AuditLogEvent.GuildUpdate}`)[0]?.changes).toEqual([{ key: "verification_level", old_value: 0, new_value: 2 }]);
+    expect(audit(`?action_type=${AuditLogEvent.GuildUpdate}`)[2]?.changes).toEqual([{ key: "verification_level", old_value: 0, new_value: 2 }]);
   });
 
   it("PATCH /guilds toggles COMMUNITY only with its prerequisites", () => {
