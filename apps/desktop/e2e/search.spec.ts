@@ -107,7 +107,7 @@ test('in: restricts a guild search to one channel and the chip can be removed wi
   await openStockTalk(page);
   await box(page).click();
   await box(page).fill('in:gen');
-  await page.getByRole('option', { name: 'general' }).click();
+  await page.getByRole('option', { name: 'general', exact: true }).click(); // the General voice channel is listed too
   await expect(page.locator('.search-chip[data-kind="in"]')).toContainText('general');
   await box(page).fill('morning');
   await box(page).press('Enter');

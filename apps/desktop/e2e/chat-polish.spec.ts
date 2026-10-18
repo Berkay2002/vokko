@@ -18,7 +18,8 @@ async function openChannel(page: Page, name: string, theme?: string): Promise<vo
     return `/channels/${c.guild_id}/${c.id}`;
   }, name);
   await page.evaluate(path => { history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate')); }, target);
-  await page.locator('.channel-header').getByRole('heading', { name, exact: true }).waitFor();
+  if (page.viewportSize()!.width < 600) await page.locator('a.channel-row[aria-current="page"]').first().click(); // phone: the list page first
+  await page.locator('.chat-textarea').waitFor();
 }
 
 const shot = async (page: Page, name: string) => { if (SHOTS) await page.screenshot({ path: `${SHOTS}/${name}-${page.viewportSize()!.width}.png` }); };
@@ -99,4 +100,17 @@ test('Frequently Used counts sent emoji and quick reactions; right-click Favorit
   await picker.locator('[data-cat="favorites"] .chat-emoji-cell').click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Unfavorite' }).click();
   await expect(picker.locator('[data-cat="favorites"]')).toHaveCount(0);
+});
+
+test.describe('phone width', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+  test('code, nested lists and # autocomplete fit', async ({ page }) => {
+    await openChannel(page, 'random');
+    await send(page, '- item a\n  - nested b\n    - deeper c\nsome `inline code` here\n```rust\nfn main() {}\n```');
+    await expect(page.locator('.chat-msg').last().locator('ul ul ul li', { hasText: 'deeper c' })).toBeVisible();
+    await shot(page, 'md-onyx');
+    await composer(page).fill('#ann');
+    await expect(rows(page).first()).toContainText('announcements');
+    await shot(page, 'ac-channels');
+  });
 });
