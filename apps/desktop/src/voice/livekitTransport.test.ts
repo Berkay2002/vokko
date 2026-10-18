@@ -25,6 +25,7 @@ const lk = vi.hoisted(() => {
     }
     async restartTrack(opts: unknown) {
       this.restarts.push(opts);
+      state.order.push("restart");
       // Like a real restart: the new capture track comes back enabled.
       this.isMuted = false;
     }
@@ -59,6 +60,8 @@ const lk = vi.hoisted(() => {
     /** The options of every publishTrack, same order. */
     publishOptions: [] as unknown[],
     switches: [] as { kind: string; deviceId: string; mutedAfter: boolean | null }[],
+    /** Gate and capture calls in order: the gate's muted-speech clone must be released before the mic is re-captured. */
+    order: [] as string[],
     /** Remote participants already in the room when a new Room connects. */
     remotes: [] as { identity: string }[],
   };
@@ -117,6 +120,7 @@ const lk = vi.hoisted(() => {
       const track = this.localParticipant.publication?.audioTrack;
       // LiveKit restarts the capture track on a switch: it comes back unmuted.
       if (kind === "audioinput" && track) track.isMuted = false;
+      state.order.push(`switch:${kind}`);
       state.switches.push({ kind, deviceId, mutedAfter: track ? track.isMuted : null });
       return true;
     }
@@ -142,6 +146,9 @@ vi.mock("./gate", () => ({
     }
     setMuted(m: boolean) {
       this.muted = m;
+    }
+    pauseTap() {
+      lk.state.order.push("pauseTap");
     }
     setKey() {}
     configure() {}
@@ -243,14 +250,17 @@ describe("LiveKitTransport: never live on join", () => {
     await settle();
     t.setSelfMute(true);
     await settle();
+    const from = lk.state.order.length;
     t.applySettings({ ...DEFAULT_SETTINGS, inputDeviceId: "id-usb" });
     await settle();
     expect(lk.state.switches.at(-1)).toMatchObject({ kind: "audioinput", deviceId: "id-usb" });
+    expect(lk.state.order.slice(from)).toEqual(["pauseTap", "switch:audioinput"]); // the clone is released before the re-capture
     const pub = lk.state.rooms[0]!.localParticipant.publication!;
     expect(pub.isMuted).toBe(true);
     // A processing-constraint change restarts the track: still muted afterwards.
     t.applySettings({ ...DEFAULT_SETTINGS, inputDeviceId: "id-usb", noiseSuppression: false });
     await settle();
+    expect(lk.state.order.slice(from + 2)).toEqual(["pauseTap", "restart"]);
     expect(pub.audioTrack.restarts).toHaveLength(1);
     expect(pub.isMuted).toBe(true);
     await t.dispose();

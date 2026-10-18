@@ -28,7 +28,7 @@ import { TitleBar } from "./TitleBar";
 import { StaleChunkBanner } from "./staleChunks";
 import { VerifyEmailNotice } from "../account/VerifyEmailNotice";
 import { UserPanel } from "./UserPanel";
-import { StageView, toggleSelfDeaf, toggleSelfMute, VoiceChannelPage, VoiceConnectionPanel } from "../voice";
+import { PhoneCallBar, StageView, toggleSelfDeaf, toggleSelfMute, VoiceChannelPage, VoiceConnectionPanel } from "../voice";
 import { inChatPanel, useShortcut } from "../keyboard";
 import { cycleRegion, installListKeys } from "../keyboard/regions";
 import { allChannelOrder, channelOrder, mentioned, step, unread, type Place } from "../keyboard/navigation";
@@ -303,6 +303,7 @@ export function AppShell() {
         <div className="sidebar-resize" aria-hidden="true" {...handlers} />
         <div className="nav-backdrop" onClick={() => useNavDrawer.getState().close()} />
         <main className="app-main" aria-label={channel ? (channel.name ?? "Conversation") : membersPage ? "Members" : "Friends"}>
+          <PhoneCallBar routeChannelId={channelId} listOpen={navOpen} />
           {!channel && isHome && <FriendsPage />}
           {membersPage && guild && <MembersPage key={guild.id} guild={guild} />}
           {!channel && !isHome && !membersPage && (

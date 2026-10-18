@@ -2044,3 +2044,120 @@
   flex: none;
   padding: 8px 0 calc(12px + env(safe-area-inset-bottom, 0px));
 }
+
+/* ---- phone: in-call bar outside the call page ---- */
+.phone-call-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  min-height: 52px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--background-base-low);
+}
+
+.phone-call-bar-main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 4px;
+  color: var(--icon-voice-connected);
+  text-align: left;
+}
+
+.phone-call-bar-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.phone-call-bar-status {
+  color: var(--text-voice-connected, var(--icon-voice-connected));
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.phone-call-bar-where {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.phone-call-bar-button {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  color: var(--text-strong);
+}
+
+.phone-call-bar-button.active {
+  background: var(--interactive-background-hover);
+  color: var(--icon-voice-muted);
+}
+
+.phone-call-bar-button.danger {
+  background: var(--status-danger);
+  color: #fff;
+}
+
+/* ---- "You are muted" (talking into a muted microphone) and the microphone error's retry ---- */
+.voice-muted-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: center;
+  margin: 0 16px 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--background-surface-high);
+  color: var(--text-strong);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.voice-muted-hint-unmute,
+.voice-video-error-retry {
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--interactive-background-hover);
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.voice-muted-hint-unmute:hover,
+.voice-video-error-retry:hover {
+  background: var(--interactive-background-selected);
+}
+
+/* ---- unread cue on the header's Show Chat button (the voice channel's text chat) ---- */
+.toolbar-button:has(> .voice-chat-badge) {
+  position: relative;
+}
+
+.voice-chat-badge {
+  position: absolute;
+  top: -2px;
+  right: -4px;
+}
+
+.voice-chat-badge.dot {
+  top: 3px;
+  right: 3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-strong);
+}

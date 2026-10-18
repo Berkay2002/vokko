@@ -31,6 +31,9 @@ export interface PingSample {
 }
 
 const PING_HISTORY_MAX = 120;
+export const MUTED_HINT_SHOW_MS = 5000;
+/** At most one hint per this long, so someone who keeps talking into a muted mic isn't nagged. */
+export const MUTED_HINT_COOLDOWN_MS = 20_000;
 
 interface VoiceUiStore extends Persisted {
   /** READY `media.voice_bitrate_ceiling` in bps. */
@@ -48,6 +51,10 @@ interface VoiceUiStore extends Persisted {
    * call changes channel, and the stage only knows when the streamer's tile exists.)
    */
   focusStream: Snowflake | null;
+  /** When the "You are muted" hint last fired (ms since epoch, 0 = not in this call); the UI shows it for `MUTED_HINT_SHOW_MS`. */
+  mutedHintAt: number;
+  /** The user talked while muted: raises the hint unless it fired recently, we are deafened or not muted. Returns whether it was raised. */
+  flagMutedSpeech(now?: number): boolean;
   setChatOpen(open: boolean): void;
   requestStreamFocus(userId: Snowflake | null): void;
   setFocusedTile(tileId: string | null): void;
@@ -69,6 +76,13 @@ export const useVoiceUi = create<VoiceUiStore>()(set => ({
   focusedTile: null,
   membersHidden: false,
   focusStream: null,
+  mutedHintAt: 0,
+  flagMutedSpeech(now = Date.now()) {
+    const voice = voiceStore.getState();
+    if (voice.channelId === null || !voice.selfMute || voice.selfDeaf || now - useVoiceUi.getState().mutedHintAt < MUTED_HINT_COOLDOWN_MS) return false;
+    set({ mutedHintAt: now });
+    return true;
+  },
   setChatOpen(open) {
     set({ chatOpen: open });
     persist({ chatOpen: open });
@@ -91,12 +105,20 @@ if (typeof window !== "undefined") {
   });
   // The voice store only keeps the latest ping; the connection details popout charts the recent ones.
   voiceStore.subscribe((state, prev) => {
-    if (state.channelId !== prev.channelId) useVoiceUi.setState({ pingHistory: [], focusedTile: null, membersHidden: false, ...(state.channelId === null ? { focusStream: null } : {}) });
+    if (state.channelId !== prev.channelId) useVoiceUi.setState({ pingHistory: [], focusedTile: null, membersHidden: false, mutedHintAt: 0, ...(state.channelId === null ? { focusStream: null } : {}) });
     if (state.channelId && state.pingMs !== null && state.pingMs !== prev.pingMs) {
       const history = [...useVoiceUi.getState().pingHistory, { at: Date.now(), ms: state.pingMs }];
       useVoiceUi.setState({ pingHistory: history.slice(-PING_HISTORY_MAX) });
     }
   });
+}
+
+/** True for `MUTED_HINT_SHOW_MS` after the "You are muted" hint fired, and only while still muted. */
+export function useMutedHint(): boolean {
+  const at = useVoiceUi(s => s.mutedHintAt);
+  const muted = voiceStore(s => s.selfMute && !s.selfDeaf);
+  const now = useNow(500, at > 0);
+  return muted && at > 0 && now - at < MUTED_HINT_SHOW_MS;
 }
 
 /** Seconds since `since` (ISO string), re-rendering once a second. 0 when there is no start time. */

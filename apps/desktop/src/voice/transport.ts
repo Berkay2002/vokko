@@ -13,6 +13,8 @@ export interface TransportCallbacks {
   speaking(userIds: Snowflake[]): void;
   /** Local gate opened/closed (self speaking ring). */
   selfSpeaking(speaking: boolean): void;
+  /** The user has been talking for about a second while self-muted (the microphone is heard locally only, never published). */
+  mutedSpeech?(): void;
   quality(quality: ConnectionQuality, pingMs: number | null): void;
   /** The connection is gone. `final` = never retry (moved to another device, kicked); otherwise the engine re-sends op 4. */
   closed(info: { final: boolean; reason?: VoiceErrorReason }): void;

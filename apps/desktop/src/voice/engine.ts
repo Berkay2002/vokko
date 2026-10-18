@@ -22,6 +22,7 @@ import { channelOccupants, playbackVolume, type VoiceAction, type VoiceDevice, t
 import { getVoice, voiceStore } from "./store";
 import { FakeTransport } from "./fakeTransport";
 import { isMockEndpoint, type TransportCallbacks, type VoiceTransport } from "./transport";
+import { useVoiceUi } from "./uiStore";
 import { sensitivityToDb } from "./vad";
 import { parseBackground } from "./video/backgrounds";
 import { openCamera, type CameraSession } from "./video/cameraSession";
@@ -306,6 +307,7 @@ const callbacks: TransportCallbacks = {
   },
   speaking: userIds => dispatch({ type: "speaking", userIds }),
   selfSpeaking: speaking => dispatch({ type: "selfSpeaking", speaking }),
+  mutedSpeech: () => void useVoiceUi.getState().flagMutedSpeech(),
   quality: (quality, pingMs) => {
     voiceDebug("quality", { quality, pingMs });
     dispatch({ type: "quality", quality, pingMs });

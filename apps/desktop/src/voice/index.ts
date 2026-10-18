@@ -3,6 +3,7 @@
 
 import "./voice.css";
 import { wireVoice } from "./engine";
+import { wireCallSession } from "./callSession";
 
 export {
   dismissVoiceError,
@@ -29,10 +30,15 @@ export { VoiceChannelRow } from "./VoiceChannelRow";
 export { VoiceChannelPage } from "./LazyVoiceChannelPage";
 export { VoiceConnectionPanel } from "./VoiceConnectionPanel";
 export { InVoiceCard } from "./InVoiceCard";
+export { PhoneCallBar } from "./PhoneCallBar";
+export { VoiceChatBadge } from "./VoiceChatPanel";
 export { CameraPreviewModal, ChannelStatusModal, ScreenSharePickerModal } from "./VoiceModals";
 export { useDeviceMenus } from "./deviceMenus";
 export { useVoiceUi } from "./uiStore";
 export { PttSettings } from "./PttSettings";
 export { inputDeviceMenu, outputDeviceMenu, voiceModerationItems, voiceUserMenuItems } from "./voiceMenus";
 
-if (typeof window !== "undefined") wireVoice();
+if (typeof window !== "undefined") {
+  wireVoice();
+  wireCallSession();
+}

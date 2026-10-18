@@ -220,6 +220,7 @@ export class LiveKitTransport implements VoiceTransport {
   private async switchDevice(room: Room, kind: "audioinput" | "audiooutput", pref: string): Promise<void> {
     const id = resolveDeviceId(pref, await this.enumerate(kind));
     if (this.room !== room) return;
+    if (kind === "audioinput") this.gate?.pauseTap(); // a live clone of the old capture would fail the new one on iOS Safari
     const attempt = async (deviceId: string) => {
       const ok = await room.switchActiveDevice(kind, deviceId);
       if (ok === false) throw Object.assign(new Error(`could not switch to ${deviceId}`), { name: "NotFoundError" });
@@ -230,6 +231,7 @@ export class LiveKitTransport implements VoiceTransport {
 
   private async restartMic(room: Room, track: LocalAudioTrack, settings: VoiceSettings): Promise<void> {
     const id = resolveDeviceId(settings.inputDeviceId, await this.enumerate("audioinput"));
+    this.gate?.pauseTap(); // see switchDevice
     const attempt = (deviceId: string) =>
       track.restartTrack({
         deviceId: deviceId !== "default" ? deviceId : undefined,
@@ -413,7 +415,7 @@ export class LiveKitTransport implements VoiceTransport {
       if (this.room !== room) return;
       if (this.selfMute) await track.mute();
       this.gate?.destroy().catch(() => undefined);
-      const gate = new GateProcessor(this.settings ?? settings, this.selfMute, open => this.cb.selfSpeaking(open));
+      const gate = new GateProcessor(this.settings ?? settings, this.selfMute, open => this.cb.selfSpeaking(open), () => this.cb.mutedSpeech?.());
       gate.onDenoiseUnavailable = () => this.useBrowserDenoise(room);
       try {
         await track.setProcessor(gate);

@@ -130,6 +130,31 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe("voice engine: talking while muted", () => {
+  it("raises the hint once per cooldown, only while muted and not deafened", async () => {
+    const { useVoiceUi, MUTED_HINT_COOLDOWN_MS } = await import("./uiStore");
+    await startCall();
+    const cb = (slow as SlowTransport).cb;
+    cb.mutedSpeech?.();
+    expect(useVoiceUi.getState().mutedHintAt).toBe(0); // not muted
+    engine.setSelfMute(true);
+    cb.mutedSpeech?.();
+    const first = useVoiceUi.getState().mutedHintAt;
+    expect(first).toBeGreaterThan(0);
+    await vi.advanceTimersByTimeAsync(MUTED_HINT_COOLDOWN_MS - 1000);
+    cb.mutedSpeech?.();
+    expect(useVoiceUi.getState().mutedHintAt).toBe(first); // rate limited
+    await vi.advanceTimersByTimeAsync(2000);
+    engine.setSelfDeaf(true);
+    cb.mutedSpeech?.();
+    expect(useVoiceUi.getState().mutedHintAt).toBe(first); // deafened
+    engine.setSelfDeaf(false);
+    engine.setSelfMute(true);
+    cb.mutedSpeech?.();
+    expect(useVoiceUi.getState().mutedHintAt).toBeGreaterThan(first);
+  });
+});
+
 describe("voice engine: media reconnect", () => {
   it("never re-sends op 4 while a connect is in progress, however long it takes", async () => {
     await startCall();
