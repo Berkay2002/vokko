@@ -85,7 +85,7 @@
   gap: 6px;
   min-width: 0;
   height: 36px;
-  padding: 0 52px 0 8px;
+  padding: 0 8px;
   border: 0;
   background: transparent;
   color: var(--text-default);
@@ -93,6 +93,16 @@
   font-size: 14px;
   text-align: left;
   cursor: pointer;
+}
+
+/* The name keeps the full width at rest; room for the preview and star only while they show. */
+.sb-tile:hover .sb-tile-play,
+.sb-tile:focus-within .sb-tile-play {
+  padding-right: 52px;
+}
+
+.sb-tile:has(.sb-tile-star.on):not(:hover):not(:focus-within) .sb-tile-play {
+  padding-right: 30px;
 }
 
 .sb-tile.disabled .sb-tile-play {

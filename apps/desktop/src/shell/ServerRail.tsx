@@ -11,7 +11,7 @@ import { Tooltip, useContextMenu } from "../ui";
 import { GuildIcon } from "./Avatar";
 import { canOfferDownloads, DownloadAppsModal } from "./DownloadApps";
 import { firstTextChannel } from "./channels";
-import { isMutedAt, useIsMuted, useLocalState } from "./localState";
+import { isMutedAt, mutedTest, useIsMuted, useLocalState, useMutedUntil } from "./localState";
 import { effectiveLevel } from "../notify/decide";
 import { unreadLabel } from "./DmSidebar";
 import { guildContextItems } from "./menus";
@@ -41,7 +41,8 @@ function RailItem({ state, mentions, tooltip, muted, voice, children }: { state:
 function GuildRailItem({ guild }: { guild: Guild }) {
   const location = useLocation();
   const selected = location.pathname.startsWith(`/channels/${guild.id}`);
-  const info = useStore(s => guildUnread(s, guild.id));
+  const mutedUntil = useMutedUntil();
+  const info = useStore(s => guildUnread(s, guild.id, mutedTest({ mutedUntil })));
   // Select the link target, not the channel list: the list changes on every message in the guild.
   const target = useStore(s => {
     const last = s.lastChannelByGuild[guild.id];

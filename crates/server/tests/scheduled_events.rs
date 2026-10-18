@@ -208,14 +208,21 @@ async fn validation_and_voice_events() {
     let (status, error) = post(json!({"name": "x", "entity_type": 2, "channel_id": w.channel, "scheduled_start_time": in_hours(2)})).await;
     assert_eq!((status, error["code"].clone()), (StatusCode::BAD_REQUEST, json!(50035)), "{error}");
 
-    // a voice event with a recurrence rule; the stage type also points at a voice channel
+    // a voice event with a recurrence rule; a stage event needs a stage channel
     let rule = json!({"start": in_hours(2), "end": null, "frequency": 2, "interval": 1, "by_weekday": [4, 1, 4], "count": 10});
     let (status, event) =
         post(json!({"name": "Game night", "entity_type": 2, "channel_id": voice, "scheduled_start_time": in_hours(2), "recurrence_rule": rule})).await;
     assert_eq!(status, StatusCode::OK, "{event}");
     assert_eq!((event["channel_id"].clone(), event["entity_metadata"].clone(), event["scheduled_end_time"].clone()), (json!(voice), Value::Null, Value::Null));
     assert_eq!(event["recurrence_rule"]["by_weekday"], json!([1, 4]));
-    assert_eq!(post(json!({"name": "Stage", "entity_type": 1, "channel_id": voice, "scheduled_start_time": in_hours(3)})).await.0, StatusCode::OK);
+    let (status, error) = post(json!({"name": "Stage", "entity_type": 1, "channel_id": voice, "scheduled_start_time": in_hours(3)})).await;
+    assert_eq!((status, error["code"].clone()), (StatusCode::BAD_REQUEST, json!(50035)), "a voice channel is not a stage: {error}");
+    let (status, stage) = w.app.post(&w.path("/channels"), &w.owner, json!({"name": "town-hall", "type": 13})).await;
+    assert_eq!(status, StatusCode::OK, "{stage}");
+    let stage = stage["id"].as_str().expect("id").to_owned();
+    assert_eq!(post(json!({"name": "Stage", "entity_type": 1, "channel_id": stage, "scheduled_start_time": in_hours(3)})).await.0, StatusCode::OK);
+    let (status, error) = post(json!({"name": "x", "entity_type": 2, "channel_id": stage, "scheduled_start_time": in_hours(3)})).await;
+    assert_eq!((status, error["code"].clone()), (StatusCode::BAD_REQUEST, json!(50035)), "a stage is not a voice channel: {error}");
 
     // switching a scheduled event to external needs a location and drops the channel
     let (status, error) = w.app.patch(&event_path(&w, &event, ""), &w.owner, json!({"entity_type": 3})).await;

@@ -11,7 +11,7 @@ import { Tooltip, useContextMenu, type MenuItem } from "../ui";
 import { GuildIcon } from "../shell/Avatar";
 import { unreadLabel } from "../shell/DmSidebar";
 import { markGuildsRead } from "../shell/actions";
-import { isMutedAt, useLocalState } from "../shell/localState";
+import { isMutedAt, mutedTest, useLocalState, useMutedUntil } from "../shell/localState";
 import { FolderSettingsModal } from "./FolderSettingsModal";
 import { dropZone, editFolder, entriesToSettings, moveFolder, moveGuild, railEntries, rollUp, ungroupFolder, type DropTarget, type RailEntry } from "./railOrder";
 import { saveGuildLayout, guildLayoutStore } from "./guildLayoutStore";
@@ -60,8 +60,9 @@ function FolderTile({ folder, guilds, expanded, onToggle, onMenu }: { folder: Ra
   const ids = folder.folder.guild_ids;
   const selected = !expanded && ids.some(id => location.pathname.startsWith(`/channels/${id}`));
   // Flat primitives so the store's shallow compare can tell nothing changed.
+  const mutedUntil = useMutedUntil();
   const flat = useStore(s => ids.flatMap(id => {
-    const state = guildUnread(s, id);
+    const state = guildUnread(s, id, mutedTest({ mutedUntil }));
     return [state.unread ? 1 : 0, state.mentions];
   }));
   const mutes = useLocalState(s => ids.map(id => (isMutedAt(s, id) ? "1" : "0")).join(""));
@@ -194,7 +195,7 @@ export function RailGuilds({ renderGuild }: { renderGuild: (guild: Guild) => Rea
   const folderMenu = (entry: RailEntry & { kind: "folder" }): MenuItem[] => {
     const ids = entry.folder.guild_ids;
     const open = expanded.has(entry.folder.id);
-    const unread = ids.some(id => guildUnread(appStore.getState(), id).unread);
+    const unread = ids.some(id => guildUnread(appStore.getState(), id, mutedTest(useLocalState.getState())).unread);
     return [
       { id: "folder-read", label: "Mark Folder As Read", disabled: !unread, onSelect: () => void markGuildsRead(ids).catch(() => undefined) },
       { type: "separator" },

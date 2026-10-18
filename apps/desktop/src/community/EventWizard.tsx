@@ -63,7 +63,7 @@ function initialForm(event: GuildScheduledEvent | undefined, firstVoice: string)
 }
 
 const LOCATIONS: { type: ScheduledEventEntityType; label: string; hint: string; icon: typeof Mic }[] = [
-  { type: ScheduledEventEntityType.StageInstance, label: "Stage Channel", hint: "Host a talk or Q&A. Vokko has no stage channels yet, so this uses a voice channel.", icon: Radio },
+  { type: ScheduledEventEntityType.StageInstance, label: "Stage Channel", hint: "Host a talk or Q&A with your community.", icon: Radio },
   { type: ScheduledEventEntityType.Voice, label: "Voice Channel", hint: "Hang out together with voice.", icon: Mic },
   { type: ScheduledEventEntityType.External, label: "Somewhere Else", hint: "Text channel, external link or in-person location.", icon: MapPin },
 ];
@@ -71,10 +71,15 @@ const LOCATIONS: { type: ScheduledEventEntityType; label: string; hint: string; 
 /** Create-event wizard (location, info, review); with `eventId` it edits that event instead. */
 export function EventWizard({ guildId, eventId, from }: { guildId: Snowflake; eventId?: Snowflake; from?: "events" | "detail" }) {
   const existing = useStore(s => s.channels);
-  const voiceChannels = useMemo(
-    () => Object.values(existing).filter(c => c.guild_id === guildId && c.type === ChannelType.GuildVoice).sort((a, b) => a.position - b.position),
-    [existing, guildId],
-  );
+  // Voice events take voice channels, stage events stage channels (the server checks the same).
+  const rooms = useMemo(() => {
+    const of = (type: ChannelType) =>
+      Object.values(existing)
+        .filter(c => c.guild_id === guildId && c.type === type)
+        .sort((a, b) => a.position - b.position)
+        .map(c => c.id);
+    return { voice: of(ChannelType.GuildVoice), stage: of(ChannelType.GuildStage) };
+  }, [existing, guildId]);
   const guild = useStore(s => s.guilds[guildId]);
   const meId = useStore(s => s.me?.id);
   const myMember = useStore(s => (meId ? s.members[guildId]?.[meId] : undefined));
@@ -99,14 +104,16 @@ export function EventWizard({ guildId, eventId, from }: { guildId: Snowflake; ev
     };
   }, [guildId, eventId]);
   if (!ready) return <Modal open onClose={closeCommunityModal} title="Edit Event"><p className="cm-empty">Loading…</p></Modal>;
-  return <WizardBody key={event?.id ?? "new"} guildId={guildId} event={event} voiceChannelIds={voiceChannels.map(c => c.id)} uploadChannel={uploadChannel} from={from} />;
+  return <WizardBody key={event?.id ?? "new"} guildId={guildId} event={event} rooms={rooms} uploadChannel={uploadChannel} from={from} />;
 }
 
-function WizardBody({ guildId, event, voiceChannelIds, uploadChannel, from }: { guildId: Snowflake; event: GuildScheduledEvent | undefined; voiceChannelIds: Snowflake[]; uploadChannel: Snowflake | undefined; from?: "events" | "detail" }) {
+function WizardBody({ guildId, event, rooms, uploadChannel, from }: { guildId: Snowflake; event: GuildScheduledEvent | undefined; rooms: { voice: Snowflake[]; stage: Snowflake[] }; uploadChannel: Snowflake | undefined; from?: "events" | "detail" }) {
   const editing = !!event;
   const active = event?.status === ScheduledEventStatus.Active;
   const channels = useStore(s => s.channels);
-  const [form, setForm] = useState<EventForm>(() => initialForm(event, voiceChannelIds[0] ?? ""));
+  const [form, setForm] = useState<EventForm>(() => initialForm(event, rooms.voice[0] ?? ""));
+  const stage = form.entityType === ScheduledEventEntityType.StageInstance;
+  const channelIds = stage ? rooms.stage : rooms.voice;
   const [step, setStep] = useState<Step>(editing ? 1 : 0);
   // A running event keeps its place: the location step is only for events that have not started.
   const [touched, setTouched] = useState(false);
@@ -265,7 +272,10 @@ function WizardBody({ guildId, event, voiceChannelIds, uploadChannel, from }: { 
                   role="radio"
                   aria-checked={selected}
                   className={`cm-choice${selected ? " selected" : ""}`}
-                  onClick={() => patch({ entityType: option.type })}
+                  onClick={() => {
+                    const ids = option.type === ScheduledEventEntityType.StageInstance ? rooms.stage : rooms.voice;
+                    patch({ entityType: option.type, ...(ids.includes(form.channelId) ? {} : { channelId: (event?.entity_type === option.type ? event.channel_id : null) ?? ids[0] ?? "" }) });
+                  }}
                 >
                   <Icon size={24} aria-hidden="true" />
                   <span>
@@ -287,14 +297,14 @@ function WizardBody({ guildId, event, voiceChannelIds, uploadChannel, from }: { 
           ) : (
             <div className="cm-field">
               <label className="field-label" htmlFor="cm-channel">
-                Voice channel <span className="required">*</span>
+                {stage ? "Stage channel" : "Voice channel"} <span className="required">*</span>
               </label>
-              {voiceChannelIds.length === 0 ? (
-                <p className="cm-muted">This server has no voice channel yet. Create one first, or pick &ldquo;Somewhere Else&rdquo;.</p>
+              {channelIds.length === 0 ? (
+                <p className="cm-muted">This server has no {stage ? "stage" : "voice"} channel yet. Create one first, or pick &ldquo;Somewhere Else&rdquo;.</p>
               ) : (
                 <select id="cm-channel" className="input" value={form.channelId} onChange={e => patch({ channelId: e.target.value })}>
                   {form.channelId === "" && <option value="">Channel was deleted: pick another</option>}
-                  {voiceChannelIds.map(id => (
+                  {channelIds.map(id => (
                     <option key={id} value={id}>
                       {channelName(id)}
                     </option>

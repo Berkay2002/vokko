@@ -9,6 +9,8 @@ pub struct InstanceInfo {
     /// Plain-text label of the consent checkbox; `None` = no checkbox.
     pub terms: Option<String>,
     pub terms_url: Option<String>,
+    /// The instance sends mail (SMTP): verification level Low and up need a verified email, new accounts are asked to verify.
+    pub email_verification: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

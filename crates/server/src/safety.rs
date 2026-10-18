@@ -43,18 +43,20 @@ pub async fn check_send(state: &AppState, access: &ChannelAccess, user_id: i64, 
 
 /// 403 50009 when the guild's verification level is above what the member meets. Roles, administrators and the owner bypass it.
 async fn check_verification(state: &AppState, guild_id: i64, user_id: i64) -> ApiResult<()> {
-    let row: Option<(i16, i64, OffsetDateTime, OffsetDateTime, bool)> = sqlx::query_as(
+    let row: Option<(i16, i64, OffsetDateTime, OffsetDateTime, bool, bool)> = sqlx::query_as(
         "SELECT g.verification_level, g.owner_id, u.created_at, m.joined_at, \
-         EXISTS (SELECT 1 FROM member_roles r WHERE r.guild_id = m.guild_id AND r.user_id = m.user_id) \
+         EXISTS (SELECT 1 FROM member_roles r WHERE r.guild_id = m.guild_id AND r.user_id = m.user_id), u.email_verified \
          FROM guilds g JOIN guild_members m ON m.guild_id = g.id JOIN users u ON u.id = m.user_id WHERE g.id = $1 AND m.user_id = $2",
     )
     .bind(guild_id)
     .bind(user_id)
     .fetch_optional(&state.db)
     .await?;
-    let Some((level, owner_id, created_at, joined_at, has_roles)) = row else { return Ok(()) };
+    let Some((level, owner_id, created_at, joined_at, has_roles, email_verified)) = row else { return Ok(()) };
     let level = VerificationLevel::from_u8(level as u8).unwrap_or_default();
-    if owner_id == user_id || has_roles || meets_level(level, created_at, joined_at, OffsetDateTime::now_utc()) {
+    // An instance without SMTP only logs the verification mail: nobody could verify, so the email rule is off there.
+    let email_ok = email_verified || !state.accounts.mailer.delivers();
+    if owner_id == user_id || has_roles || meets_level(level, email_ok, created_at, joined_at, OffsetDateTime::now_utc()) {
         return Ok(());
     }
     if guild_access(state, user_id, guild_id).await?.permissions & ADMINISTRATOR != 0 {
@@ -63,13 +65,15 @@ async fn check_verification(state: &AppState, guild_id: i64, user_id: i64) -> Ap
     Err(ApiErr::verification_level())
 }
 
-pub fn meets_level(level: VerificationLevel, created_at: OffsetDateTime, joined_at: OffsetDateTime, now: OffsetDateTime) -> bool {
+/// Discord's levels: Low needs a verified email (`email_ok`), Medium also a 5-minute-old account, High also 10 minutes of membership.
+pub fn meets_level(level: VerificationLevel, email_ok: bool, created_at: OffsetDateTime, joined_at: OffsetDateTime, now: OffsetDateTime) -> bool {
     let account_ok = now - created_at >= Duration::minutes(5);
     let member_ok = now - joined_at >= Duration::minutes(10);
     match level {
-        VerificationLevel::None | VerificationLevel::Low => true,
-        VerificationLevel::Medium => account_ok,
-        VerificationLevel::High | VerificationLevel::VeryHigh => account_ok && member_ok,
+        VerificationLevel::None => true,
+        VerificationLevel::Low => email_ok,
+        VerificationLevel::Medium => email_ok && account_ok,
+        VerificationLevel::High | VerificationLevel::VeryHigh => email_ok && account_ok && member_ok,
     }
 }
 
@@ -495,10 +499,13 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         let fresh = now - Duration::minutes(1);
         let old = now - Duration::hours(1);
-        assert!(meets_level(VerificationLevel::Low, fresh, fresh, now));
-        assert!(!meets_level(VerificationLevel::Medium, fresh, old, now));
-        assert!(meets_level(VerificationLevel::Medium, old, fresh, now));
-        assert!(!meets_level(VerificationLevel::High, old, fresh, now));
-        assert!(meets_level(VerificationLevel::VeryHigh, old, old, now));
+        assert!(meets_level(VerificationLevel::None, false, fresh, fresh, now));
+        assert!(meets_level(VerificationLevel::Low, true, fresh, fresh, now));
+        assert!(!meets_level(VerificationLevel::Low, false, old, old, now), "Low needs a verified email");
+        assert!(!meets_level(VerificationLevel::Medium, true, fresh, old, now));
+        assert!(meets_level(VerificationLevel::Medium, true, old, fresh, now));
+        assert!(!meets_level(VerificationLevel::Medium, false, old, old, now));
+        assert!(!meets_level(VerificationLevel::High, true, old, fresh, now));
+        assert!(meets_level(VerificationLevel::VeryHigh, true, old, old, now));
     }
 }

@@ -25,6 +25,7 @@ import { ServerRail } from "./ServerRail";
 import { NativeMenuBridge } from "./NativeMenuBridge";
 import { TitleBar } from "./TitleBar";
 import { StaleChunkBanner } from "./staleChunks";
+import { VerifyEmailNotice } from "../account/VerifyEmailNotice";
 import { UserPanel } from "./UserPanel";
 import { StageView, toggleSelfDeaf, toggleSelfMute, VoiceChannelPage, VoiceConnectionPanel } from "../voice";
 import { inChatPanel, useShortcut } from "../keyboard";
@@ -277,6 +278,7 @@ export function AppShell() {
       <NativeMenuBridge />
       <TitleBar />
       <StaleChunkBanner />
+      <VerifyEmailNotice />
       <div className="app-body">
         <Rail />
         {/* Discord's names for the list column; it holds the user panel too. */}

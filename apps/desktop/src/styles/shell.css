@@ -119,6 +119,39 @@
   background: color-mix(in srgb, currentColor 12%, transparent);
 }
 
+/* Discord's default (brand) notice, e.g. "Please check your email"; room on the right for the close button */
+.app-notice.brand {
+  position: relative;
+  padding: 4px 44px;
+  background: var(--brand-500, #5865f2);
+  color: #fff;
+  text-align: center;
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+.app-notice-close {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: inherit;
+  opacity: 0.8;
+  transform: translateY(-50%);
+  cursor: pointer;
+}
+
+.app-notice-close:hover {
+  opacity: 1;
+}
+
 .title-bar-title {
   position: absolute;
   inset: 0;
@@ -518,6 +551,60 @@
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thin-thumb) transparent;
+}
+
+/* "New Unreads" / "New Mentions" (shell/ChannelJumpBar.tsx): sticky, zero height, so the list does not move. */
+.channel-jump {
+  position: sticky;
+  z-index: 3;
+  display: flex;
+  justify-content: center;
+  height: 0;
+  pointer-events: none;
+}
+
+.channel-jump.top {
+  top: 0;
+  align-items: flex-start;
+}
+
+.channel-jump.top .channel-jump-pill {
+  margin-top: 4px;
+}
+
+.channel-jump.bottom {
+  bottom: 0;
+  align-items: flex-end;
+}
+
+/* clear of the 16 px fade at the bottom of the scroller */
+.channel-jump.bottom .channel-jump-pill {
+  margin-bottom: 20px;
+}
+
+.guild-sidebar.with-banner .channel-jump.top {
+  top: 49px;
+}
+
+.channel-jump-pill {
+  height: 24px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--brand-500);
+  box-shadow: var(--elevation-high);
+  color: var(--white);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 24px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.channel-jump-pill.mention {
+  background: var(--status-danger);
 }
 
 .sidebar-nav {
@@ -2291,6 +2378,28 @@ img.active-card-art {
   color: var(--text-default);
   font-size: 16px;
   font-weight: 500;
+}
+
+/* Phone: the username field takes the full width and the button sits under it, full width, inside the same box. */
+@media (max-width: 767px) {
+  .add-friend {
+    padding: 16px;
+  }
+
+  .add-friend-input {
+    flex-wrap: wrap;
+    gap: 0;
+    padding-bottom: 12px;
+  }
+
+  .add-friend-input input {
+    flex: 1 1 100%;
+  }
+
+  .add-friend-input .btn {
+    flex: 1 1 100%;
+    height: 38px;
+  }
 }
 
 /* The wrapper's border shows focus, success and error; a ring on the input inside it doubles up. */

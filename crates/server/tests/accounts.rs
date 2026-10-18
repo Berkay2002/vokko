@@ -18,7 +18,7 @@ async fn registration_rules() {
     let app = TestApp::new().await;
     let (status, info) = app.send(Method::GET, "/auth/instance", None, None).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(info, json!({"registration": "open", "min_age": 13, "terms": null, "terms_url": null}));
+    assert_eq!(info, json!({"registration": "open", "min_age": 13, "terms": null, "terms_url": null, "email_verification": true}));
 
     let mut body = signup("kid");
     body["date_of_birth"] = json!(format!("{}-01-01", time::OffsetDateTime::now_utc().year() - 10));

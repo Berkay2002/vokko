@@ -61,10 +61,23 @@ useLocalState.subscribe(state => {
   }
 });
 
-export const isMutedAt = (state: LocalState, id: Snowflake, now = Date.now()): boolean => {
+export const isMutedAt = (state: Pick<LocalState, "mutedUntil">, id: Snowflake, now = Date.now()): boolean => {
   const until = state.mutedUntil[id];
   return until === FOREVER || (until !== undefined && until > now);
 };
+
+/** guildUnread's `isMuted`: the channel/category mute test at `now`. */
+export const mutedTest =
+  (state: Pick<LocalState, "mutedUntil">, now = Date.now()) =>
+  (id: Snowflake): boolean =>
+    isMutedAt(state, id, now);
+
+/** The mute map; also re-renders when a timed mute lapses. */
+export function useMutedUntil(): Record<Snowflake, number> {
+  const mutedUntil = useLocalState(s => s.mutedUntil);
+  useMuteLapse(Object.values(mutedUntil));
+  return mutedUntil;
+}
 
 /** Ms until the soonest timed mute among `untils` lapses (a little late, so the check sees it expired); null when none is pending. */
 export function msUntilLapse(untils: readonly (number | undefined)[], now: number): number | null {

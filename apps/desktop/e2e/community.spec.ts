@@ -80,6 +80,30 @@ test('create an event with the wizard, see it in the list and mark yourself inte
   await expect(card.getByRole('button', { name: 'Interested' })).toHaveAttribute('aria-pressed', 'true');
 });
 
+test('a stage event picks a stage channel, a voice event a voice channel', async ({ page }) => {
+  await openStockTalk(page);
+  const guildId = new URL(page.url()).pathname.split('/')[2]!;
+  await page.evaluate(id => (window as unknown as Win).__vokko.request('POST', `/guilds/${id}/channels`, { name: 'town-hall', type: 13 }), guildId);
+  await page.locator('button.cm-quicklink').click();
+  await page.getByRole('dialog', { name: 'Events' }).getByRole('button', { name: 'Create Event' }).click();
+  const wizard = page.getByRole('dialog', { name: 'Create Event' });
+  await expect(wizard).not.toContainText('no stage channels');
+  await expect(wizard.getByLabel(/Voice channel/)).not.toContainText('town-hall');
+  await wizard.getByRole('radio', { name: /Stage Channel/ }).click();
+  const picker = wizard.getByLabel(/Stage channel/);
+  await expect(picker.locator('option')).toHaveText(['town-hall']);
+  await wizard.getByRole('button', { name: 'Next' }).click();
+  await wizard.getByLabel(/Event topic/).fill('Town hall');
+  const day = dateInput(tomorrow());
+  await wizard.getByLabel(/Start date/).fill(day);
+  await wizard.getByLabel(/Start time/).fill('18:00');
+  await wizard.getByLabel(/End date/).fill(day);
+  await wizard.getByLabel(/End time/).fill('19:00');
+  await wizard.getByRole('button', { name: 'Next' }).click();
+  await wizard.getByRole('button', { name: 'Create Event' }).click();
+  await expect(page.getByRole('dialog', { name: 'Town hall' })).toContainText('town-hall');
+});
+
 test('an event can be started, ended and deleted by its creator, and others are told through the gateway', async ({ page }) => {
   await openStockTalk(page);
   const guildId = new URL(page.url()).pathname.split('/')[2]!;
@@ -333,6 +357,11 @@ test('the welcome checklist guides the owner of a brand-new server', async ({ pa
   await create.getByRole('button', { name: /For me and my friends/i }).click();
   await create.getByRole('textbox').fill('Fresh start');
   await create.getByRole('button', { name: 'Create' }).click();
+  // Discord's next step: the invite dialog over the new server
+  const invite = page.getByRole('dialog', { name: 'Invite friends to Fresh start' });
+  await expect(invite.locator('#invite-link')).toHaveValue(/\w+$/);
+  await page.keyboard.press('Escape');
+  await expect(invite).toBeHidden();
 
   const checklist = page.getByRole('region', { name: 'Server setup checklist' });
   await expect(checklist).toContainText('Welcome to Fresh start');
@@ -413,6 +442,8 @@ test('the welcome checklist and the suggestions tab pass axe', async ({ page }) 
   await create.getByRole('button', { name: /For me and my friends/i }).click();
   await create.getByRole('textbox').fill('Fresh start');
   await create.getByRole('button', { name: 'Create' }).click();
+  await page.getByRole('dialog', { name: 'Invite friends to Fresh start' }).waitFor();
+  await page.keyboard.press('Escape');
   await expect(page.getByRole('region', { name: 'Server setup checklist' })).toBeVisible();
   await expectClean(page, '.cm-welcome');
   await expectClean(page, '.cm-quicklink');
