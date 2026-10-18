@@ -1052,7 +1052,8 @@
   text-align: left;
 }
 
-.guild-menu-item:hover:not(:disabled) {
+.guild-menu-item:hover:not(:disabled),
+.guild-menu-item:focus-visible:not(:disabled) {
   background: var(--interactive-background-hover);
   color: var(--text-default);
 }

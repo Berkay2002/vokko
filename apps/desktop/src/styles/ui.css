@@ -131,6 +131,12 @@ html.has-top-banner .context-menu {
   color: var(--text-default);
 }
 
+/* Keyboard focus sits on the menu and its rows; the .focused highlight shows it (Discord draws no ring there). */
+.context-menu:focus,
+.context-menu-item:focus {
+  outline: none;
+}
+
 .context-menu-item.danger {
   color: var(--text-danger);
 }

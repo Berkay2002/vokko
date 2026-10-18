@@ -241,7 +241,6 @@ test.describe('keyboard: menus', () => {
   });
 
   test('context menu moves DOM focus into the menu', async ({ page }) => {
-    test.fail(true, 'A11Y-06: items are non-focusable divs driven by a document keydown listener; no focus move, no aria-activedescendant');
     await openGuild(page);
     await page.getByRole('link', { name: 'general' }).focus();
     await page.keyboard.press('Shift+F10');
@@ -289,7 +288,6 @@ test.describe('keyboard: menus', () => {
     { name: 'emoji picker', open: (p: Page) => p.getByRole('button', { name: 'Select emoji' }).focus().then(() => p.keyboard.press('Enter')), box: '.popout' },
   ]) {
     test(`popout takes focus: ${popout.name}`, async ({ page }) => {
-      test.fail(true, 'A11Y-04: popouts are portaled to the end of <body> and never receive focus, so their controls are not in the Tab sequence');
       await openGuild(page);
       await popout.open(page);
       await expect(page.locator(popout.box).first()).toBeVisible();
@@ -298,6 +296,37 @@ test.describe('keyboard: menus', () => {
       expect((await focusInfo(page, popout.box)).inside).toBe(true);
     });
   }
+
+  test('server menu: arrows move focus through the items, Esc gives focus back to the server name', async ({ page }) => {
+    await openGuild(page);
+    const opener = page.locator('.guild-header-name-button');
+    await opener.focus();
+    await page.keyboard.press('Enter');
+    const items = page.locator('.guild-menu [role^=menuitem]:not([aria-disabled=true])');
+    await page.keyboard.press('Home');
+    await expect(items.first()).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(items.nth(1)).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('ArrowUp');
+    await expect(items.last()).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.guild-menu')).toHaveCount(0);
+    await expect(opener).toBeFocused();
+  });
+
+  test('reaction picker focuses its search on open and gives focus back on Esc', async ({ page }) => {
+    await openGuild(page);
+    const message = page.locator('.chat-msg').first();
+    await message.hover();
+    const opener = message.getByRole('button', { name: 'Add Reaction' });
+    await opener.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.popout input').first()).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.popout')).toHaveCount(0);
+    await expect(opener).toBeFocused();
+  });
 
   test('Esc closes the top layer first (dialog over menu)', async ({ page }) => {
     await openGuild(page);
@@ -345,7 +374,6 @@ test.describe('keyboard: dialogs', () => {
   });
 
   test('server settings opened from a menu returns focus somewhere useful on Esc', async ({ page }) => {
-    test.fail(true, 'A11Y-11: the opener (a menu item) is unmounted before Esc, focus falls to <body>');
     await openGuild(page);
     await page.locator('.guild-header-name-button').click();
     await page.getByRole('menuitem', { name: 'Server Settings' }).click();
@@ -385,7 +413,6 @@ test.describe('keyboard: shortcuts', () => {
   });
 
   test('quick switcher returns focus to where it was opened from', async ({ page }) => {
-    test.fail(true, 'A11Y-11: closing the switcher leaves focus on <body> (QuickSwitcher is unmounted by the modal store before the focus restore runs)');
     await openGuild(page);
     const opener = page.getByRole('button', { name: 'Inbox' });
     await opener.focus();
