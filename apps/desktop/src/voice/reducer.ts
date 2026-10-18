@@ -430,7 +430,10 @@ export function voiceReducer(model: VoiceModel, action: VoiceAction): VoiceModel
       const speaking: Record<Snowflake, true> = {};
       for (const id of action.userIds) if (id !== model.meId) speaking[id] = true;
       if (model.meId && model.speaking[model.meId]) speaking[model.meId] = true;
-      return pruneSpeaking({ ...model, speaking });
+      const next = pruneSpeaking({ ...model, speaking });
+      // The SFU repeats unchanged speaker lists; an unchanged model spares every voice-store subscriber a selector pass.
+      const ids = Object.keys(next.speaking);
+      return ids.length === Object.keys(model.speaking).length && ids.every(id => model.speaking[id]) ? model : next;
     }
     case "selfSpeaking": {
       if (!model.meId) return model;
