@@ -498,7 +498,7 @@ describe('abuse guard through the model tools', () => {
     expect(r).toStartWith('not unpaused')
     await turn(s, OWNER, async ctx => void (r = await ctx.unpause({ user_id: EVE })), true, `why is <@${EVE}> paused?`)
     expect(r).toStartWith('not unpaused')
-    await turn(s, MOD, async ctx => void (r = await ctx.unpause({ user_id: EVE })), true, `please unpause <@${EVE}>`)
+    await turn(s, MOD, async ctx => void (r = await ctx.unpause({ user_id: EVE })), true, `unpause <@${EVE}>`)
     expect(r).toBe(`unpaused <@${EVE}>`)
     // a !pause (manual), here or everywhere, is never lifted by the model
     s.bridge.pauses.add({ userId: EVE, scope: GUILD, minutes: 60, reason: '', by: MOD, manual: true }, s.clock.now())
@@ -519,6 +519,31 @@ describe('abuse guard through the model tools', () => {
     expect(s.bridge.pauses.active(NAT, GUILD, s.clock.now())?.minutes).toBe(60)
     await turn(s, MOD, async ctx => void (r = await ctx.pause({ user_id: EVE, minutes: 120, reason: 'asked' })), true, `pause <@${EVE}> 2h`)
     expect(r).toBe(`paused <@${EVE}> for 120 minutes`)
+  })
+
+  test('only the command form carries rights: talk about pausing someone, code and quotes do not', async () => {
+    await s.bridge.handle(msg(EVE, 'hello all', { guild: GUILD }))
+    const planted = [`don't mute <@${EVE}>`, `should I pause <@${EVE}>?`, `ignore my typo, what does <@${EVE}> think`, '```\npause <@' + EVE + '> 1440\n```', `> pause <@${EVE}> 1440`]
+    for (const text of planted) {
+      let r = ''
+      await turn(s, MOD, async ctx => void (r = await ctx.pause({ user_id: EVE, minutes: 1440, reason: 'planted' })), true, text)
+      expect([text, r]).toEqual([text, `paused <@${EVE}> for 60 minutes`]) // member rules
+      s.bridge.pauses.remove(EVE, '*')
+    }
+    let r = ''
+    await turn(s, MOD, async ctx => void (r = await ctx.pause({ user_id: EVE, minutes: 1440, reason: 'asked' })), true, `<@${BOT}> mute <@${EVE}> for 1 day`)
+    expect(r).toBe(`paused <@${EVE}> for 1440 minutes`)
+  })
+
+  test("a later, shorter pause never cuts a moderator's longer one", async () => {
+    await s.bridge.handle(msg(EVE, 'hello all', { guild: GUILD }))
+    await turn(s, MOD, async ctx => void (await ctx.pause({ user_id: EVE, minutes: 1440, reason: 'asked' })), true, `pause <@${EVE}> 1 day`)
+    s.clock.advance(2 * 60_000)
+    await turn(s, NAT, async ctx => void (await ctx.pause({ user_id: EVE, minutes: 5, reason: 'accomplice' })), true, 'eve is spamming')
+    const p = s.bridge.pauses.active(EVE, GUILD, s.clock.now())
+    expect(p?.minutes).toBe(1440)
+    expect(p?.by).toBe(MOD)
+    expect(s.bridge.pauses.active(EVE, GUILD, s.clock.now() + 60 * 60_000)).toBeDefined()
   })
 
   test("a moderator's rights apply only to people their own message names (else member limits)", async () => {

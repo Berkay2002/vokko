@@ -115,10 +115,16 @@ export class PauseStore {
 
   add(p: Omit<Pause, 'until' | 'at' | 'noticed'>, now = Date.now(), noticed = false): Pause {
     this.prune(now)
-    const pause: Pause = { ...p, at: now, until: now + p.minutes * 60_000, noticed }
-    // Replaces this person's pause in the same scope, except that the model never replaces a manual one.
-    this.data.pauses = this.data.pauses.filter(x => !(x.userId === p.userId && x.scope === p.scope && (p.manual || !x.manual)))
-    this.data.pauses.push(pause)
+    let pause: Pause = { ...p, at: now, until: now + p.minutes * 60_000, noticed }
+    // One pause per person and scope; a new one never shortens it or makes it liftable by the model.
+    const old = this.data.pauses.find(x => x.userId === p.userId && x.scope === p.scope)
+    if (old) {
+      const manual = old.manual || p.manual || undefined
+      if (old.until >= pause.until) pause = old
+      else this.data.pauses = this.data.pauses.filter(x => x !== old)
+      if (manual) pause.manual = true
+    }
+    if (pause !== old) this.data.pauses.push(pause)
     const history = (this.data.history[p.userId] ??= [])
     if (!history.some(t => now - t < BURST_MS)) history.push(now)
     this.save()

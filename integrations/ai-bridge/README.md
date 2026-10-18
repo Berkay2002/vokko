@@ -60,7 +60,7 @@ If it replies "Codex isn't signed in on the host", run `codex login`.
 | `ANTHROPIC_API_KEY` | | claude-api only, from the process environment |
 | `VOKKO_STATE_DIR` | `~/.claude/channels/vokko` (api), `~/.vokko/codex` (codex) | token, access, sessions, usage, pauses |
 | `VOKKO_BRIDGE_ROLE` | `shared` (api), `standalone` (codex) | `shared`: the plugin's token, takes only what it hands off. `standalone`: its own bot, answers everything its access allows |
-| `VOKKO_AI_MODEL` | `claude-sonnet-5-5` / Codex's default | |
+| `VOKKO_AI_MODEL` | `claude-sonnet-5-5` / Codex's first listed model | Codex refuses to start with a model its catalog doesn't list |
 | `VOKKO_AI_RATE_PER_HOUR` | 20 | messages per user per hour (you are exempt) |
 | `VOKKO_AI_MONTHLY_USD` | 150 | after this the bot replies "Monthly budget reached" until the next month (counts cache reads/writes and failed turns too) |
 | `VOKKO_AI_MAX_OUTPUT_TOKENS` | 1024 | |
@@ -88,15 +88,16 @@ Claude can pause someone who abuses it (`pause_user` / `unpause_user`), but ever
 message author, not the model's word:
 
 - Without a user it pauses the author. Never you, never the bot. Targets must be real members of that server.
-- Your or a moderator's rights apply only when your own message names the target and says what to do (`pause`,
-  `mute`, `silence`, `ignore`; for lifting, `unpause` or `unmute`). Otherwise the member rules apply, so text planted
+- Your or a moderator's rights apply only when your own message is the command itself: it starts (after the bot's
+  mention) with `pause`, `mute` or `silence` followed by the person's mention (`unpause` / `unmute` to lift); code
+  and `> ` quotes don't count. Otherwise the member rules apply, so text planted
   earlier in the conversation can't borrow them: the target must have posted in that channel in the last 15 minutes,
   and the pause is at most 60 minutes, doubling included. The same 60-minute cap applies when the model pauses the
   author on its own.
 - 5 to 1440 minutes; a repeat within 7 days doubles (pauses within a minute of each other count once). Messages queued
   before a pause are dropped. The paused person gets one notice, then silence. You get a DM with a link. Pauses
   survive restarts.
-- The model may lift only its own pauses.
+- The model may lift only its own pauses, and a new pause never shortens an existing one.
 
 A conversation (per DM or channel) starts over after 40 turns or 3 days, or after a reply that hit the per-reply budget
 or turn limit.

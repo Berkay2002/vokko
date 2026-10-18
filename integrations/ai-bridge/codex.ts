@@ -160,7 +160,13 @@ export function codexBackend(opts: CodexOptions): Backend {
   const env = childEnv(hostHome ? { CODEX_HOME: hostHome } : {})
   const listers = opts.listers ?? cliListers(opts.codexPath, env)
   const catalog = join(dirname(opts.workDir), 'codex-models.json')
-  writeFileSync(catalog, leanCatalog(listers.models()), { mode: 0o600 })
+  const lean = leanCatalog(listers.models())
+  writeFileSync(catalog, lean, { mode: 0o600 })
+  // A model the catalog doesn't list would run on the CLI's fallback settings (apply_patch and all): pick one it lists.
+  const listed = (JSON.parse(lean) as { models: { slug: string; priority?: number; visibility?: string }[] }).models
+  const model = opts.model ?? [...listed].filter(m => m.visibility !== 'hide').sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99))[0]?.slug
+  if (!model || !listed.some(m => m.slug === model))
+    throw new Error(`codex: model "${model}" is not in the CLI's model catalog (${listed.map(m => m.slug).join(', ')}); set VOKKO_AI_MODEL to one of them`)
   const configOverrides = [...leanOverrides(listers), `model_catalog_json=${JSON.stringify(catalog)}`]
   const Impl = opts.Codex ?? Codex
   const codex = new Impl({ codexPathOverride: opts.codexPath, env, configOverrides })
@@ -171,7 +177,7 @@ export function codexBackend(opts: CodexOptions): Backend {
     networkAccessEnabled: false,
     webSearchMode: 'disabled',
     approvalPolicy: 'never',
-    ...(opts.model ? { model: opts.model } : {}),
+    model,
   }
   return {
     name: 'codex',

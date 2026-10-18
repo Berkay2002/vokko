@@ -96,7 +96,7 @@ describe('claude-api backend (Agent SDK stubbed at the module boundary)', () => 
 })
 
 describe('codex backend (Codex SDK stubbed at the module boundary)', () => {
-  function stubbed(run: (input: string) => Promise<any>) {
+  function stubbed(run: (input: string) => Promise<any>, model?: string) {
     const made: any[] = []
     const threads: { kind: string; id?: string; options: any; inputs: string[] }[] = []
     class FakeCodex {
@@ -130,16 +130,21 @@ describe('codex backend (Codex SDK stubbed at the module boundary)', () => {
       features: o => [{ name: 'code_mode_host', enabled: !o.includes('features.code_mode_host=false') }],
       models: () => JSON.stringify({ models: [{ slug: 'm', tool_mode: 'code_mode_only', multi_agent_version: 'v2', apply_patch_tool_type: 'freeform', experimental_supported_tools: ['clock'] }] }),
     }
-    const backend = codexBackend({ workDir: join(dir(), 'work'), botName: 'Codex', Codex: FakeCodex as any, listers })
+    const backend = codexBackend({ workDir: join(dir(), 'work'), botName: 'Codex', Codex: FakeCodex as any, listers, model })
     return { backend, made, threads }
   }
+
+  test('a model the catalog does not list: refuses to start; no model: the catalog\'s first', () => {
+    expect(() => stubbed(async () => ({}), 'gpt-unknown')).toThrow('not in the CLI\'s model catalog')
+    expect(stubbed(async () => ({ finalResponse: '', items: [] })).backend).toBeDefined()
+  })
 
   test('read-only, no network, approvals never, minimal env, house rules on a new thread only', async () => {
     process.env.OPENAI_API_KEY = 'should-not-pass'
     const { backend, made, threads } = stubbed(async () => ({ finalResponse: 'done', items: [], usage: { input_tokens: 5, output_tokens: 2 } }))
     const a = await backend.ask(undefined, 'hello', ctx)
     expect(a).toEqual({ text: 'done', sessionId: 'thread-1', inputTokens: 5, outputTokens: 2 })
-    expect(threads[0].options).toMatchObject({ sandboxMode: 'read-only', networkAccessEnabled: false, approvalPolicy: 'never', webSearchMode: 'disabled', skipGitRepoCheck: true })
+    expect(threads[0].options).toMatchObject({ model: 'm', sandboxMode: 'read-only', networkAccessEnabled: false, approvalPolicy: 'never', webSearchMode: 'disabled', skipGitRepoCheck: true })
     expect(made[0].apiKey).toBeUndefined()
     expect(made[0].env.OPENAI_API_KEY).toBeUndefined()
     expect(made[0].env.CODEX_HOME).toBeUndefined()

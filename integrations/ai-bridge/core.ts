@@ -66,12 +66,28 @@ export type BotLike = Pick<
 
 const SNOWFLAKE = /^\d{1,20}$/
 const GUILD_COMMAND_RE = /^\s*!(pause|unpause|pauses)\b/i
-/** Owner/moderator rights reach someone else only when their own message names that person with one of these. */
-const PAUSE_VERB = /\b(pause|mute|silence|ignore)\b/i
-const UNPAUSE_VERB = /\b(unpause|unmute)\b/i
+/** Owner/moderator rights reach someone else only when their own message is this command for that person. */
+const PAUSE_VERB = 'pause|mute|silence'
+const UNPAUSE_VERB = 'unpause|unmute'
 /** A channel's session starts over after this long or this many turns (each turn re-reads the whole history). */
 export const SESSION_MAX_AGE_MS = 3 * 24 * 60 * 60_000
 export const SESSION_MAX_TURNS = 40
+
+/** The message minus code (``` blocks, `inline`) and "> " quote lines: a command shown or quoted is not given. */
+export function commandText(content: string): string {
+  return content
+    .replace(/```[\s\S]*?(```|$)/g, ' ')
+    .replace(/`[^`\n]*`/g, ' ')
+    .split('\n')
+    .filter(l => !/^\s*>/.test(l))
+    .join('\n')
+}
+
+/** "<verb> <@target>" at the start of the message (after the bot's mention, if any): "don't mute <@X>" or "should I pause <@X>?" are not. */
+export function isCommandFor(content: string, verbs: string, target: string, botId: string | null): boolean {
+  const bot = botId ? `(?:<@!?${botId}>\\s*)?` : ''
+  return new RegExp(`^\\s*${bot}(?:${verbs})\\s+<@!?${target}>(\\s|$)`, 'i').test(commandText(content))
+}
 
 /** "<@123>", "<@!123>" or "123" → "123"; anything else → null. */
 export function parseUserId(s: string | undefined): string | null {
@@ -144,15 +160,14 @@ export class Bridge {
   /**
    * The rights the current message carries for a model pause/unpause of `target`. A channel shares one
    * session, so the model may act on text an earlier member planted: owner/moderator rights count only
-   * when the current message itself names that person and says pause/mute/... (`verb`). The model acting
-   * on the author themselves never gets more than member rights.
+   * when the current message itself is the command "<verb> <@target>". The model acting on the author
+   * themselves never gets more than member rights.
    */
-  private async rightsAgainst(msg: Message, target: string, verb: RegExp): Promise<Role> {
+  private async rightsAgainst(msg: Message, target: string, verbs: string): Promise<Role> {
     if (target === msg.author.id) return 'member'
     const role = await this.roleOf(msg.author.id, msg.guild_id)
     if (role === 'member') return role
-    const named = new RegExp(`(^|\\D)${target}(\\D|$)`).test(msg.content)
-    return named && verb.test(msg.content) ? role : 'member'
+    return isCommandFor(msg.content, verbs, target, this.bot.me?.id ?? null) ? role : 'member'
   }
 
   private async roleOf(userId: string, guildId: string | null): Promise<Role> {
@@ -369,7 +384,7 @@ export class Bridge {
         const target = parseUserId(user_id)
         if (!target) return `not unpaused: "${user_id}" is not a user id`
         const role = await this.rightsAgainst(msg, target, UNPAUSE_VERB)
-        if (role === 'member') return 'not unpaused: only the owner or a moderator can lift a pause, in a message that says unpause/unmute and names that person'
+        if (role === 'member') return 'not unpaused: only the owner or a moderator can lift a pause, with a message that starts "unpause @person"'
         // Only pauses the model set, and only here: a `!pause` is lifted with `!unpause`.
         const n = this.pauses.remove(target, msg.guild_id ?? 'dm', false)
         return n > 0 ? `unpaused <@${target}>` : `<@${target}> has no pause here that I can lift (a !pause needs !unpause)`
