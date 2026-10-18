@@ -84,6 +84,11 @@ export class GateProcessor implements TrackProcessor<Track.Kind.Audio, AudioProc
     this.muted = muted;
     this.talk.reset();
     this.gate.setForcedClosed(muted);
+    // The chain listens to a live clone, so muting must silence the published path itself: no ramp.
+    if (muted && this.nodes) {
+      this.nodes.gain.gain.cancelScheduledValues(0);
+      this.nodes.gain.gain.value = 0;
+    }
     this.set(this.gate.open);
   }
 

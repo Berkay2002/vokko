@@ -204,7 +204,7 @@ export function VoiceConnectionPanel() {
 
   // In a call a microphone error stays until dismissed or retried (the call page shows it with Try again).
   useEffect(() => {
-    if (!error || channelId) return;
+    if (!error || (channelId && (error.reason === "permission_denied" || error.reason === "no_microphone"))) return;
     const timer = setTimeout(dismissVoiceError, ERROR_TTL_MS);
     return () => clearTimeout(timer);
   }, [error, channelId]);
