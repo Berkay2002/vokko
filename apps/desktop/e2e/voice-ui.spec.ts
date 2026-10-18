@@ -15,7 +15,8 @@ async function openGuild(page: Page): Promise<void> {
   await page.locator('.sidebar-scroller').evaluate(el => { el.scrollTop = el.scrollHeight; });
 }
 
-const row = (page: Page, channel = 'General') => page.getByRole('button', { name: `${channel} voice channel` });
+// The whole row (status line, actions); its name part is the button.
+const row = (page: Page, channel = 'General') => page.locator('.channel-row.voice', { has: page.getByRole('button', { name: `${channel} voice channel` }) });
 const card = (page: Page) => page.getByRole('region', { name: 'Voice connection' });
 const userPanel = (page: Page) => page.getByRole('region', { name: 'User status and settings' });
 const call = (page: Page) => page.getByRole('region', { name: /call$/ });

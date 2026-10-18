@@ -97,15 +97,15 @@ export function ChannelStart() {
     const name = other ? chat.nameOf(other) : 'this user';
     return <div className="chat-start">
       {other && <Avatar user={other} size={80} className="chat-start-avatar" />}
-      <h1>{name}</h1>
-      <h2>{other?.username}</h2>
+      <h2 className="chat-start-title">{name}</h2>
+      <p className="chat-start-sub">{other?.username}</p>
       <p>This is the beginning of your direct message history with <b>{name}</b>.</p>
       {other && <DmRelationRow user={other} name={name} />}
     </div>;
   }
   if (ch && ch.type === ChannelType.GroupDM) {
     const names = (ch.recipients ?? []).map(u => chat.nameOf(u)).join(', ');
-    return <div className="chat-start"><h1>{names}</h1><p>Welcome to the beginning of the group.</p></div>;
+    return <div className="chat-start"><h2 className="chat-start-title">{names}</h2><p>Welcome to the beginning of the group.</p></div>;
   }
   if (ch && isThreadType(ch.type)) return <ThreadStart thread={ch} />;
   // Text-in-voice: a speech bubble and the bare channel name (no hash).
@@ -113,7 +113,7 @@ export function ChannelStart() {
   const label = voice ? ch?.name : `#${ch?.name}`;
   return <div className="chat-start">
     <div className="chat-start-icon">{voice ? <MessageCircle size={42} /> : <Hash size={42} />}</div>
-    <h1>Welcome to {label}!</h1>
+    <h2 className="chat-start-title">Welcome to {label}!</h2>
     <p>This is the start of the {label} channel.{ch?.topic ? ` ${ch.topic}` : ''}</p>
     {ch?.guild_id && <EditChannelButton channel={ch} />}
     {ch && chat.guildId && <ServerChecklist guildId={chat.guildId} channelId={ch.id} />}
@@ -127,7 +127,7 @@ function ThreadStart({ thread }: { thread: Channel }) {
   const owner = thread.owner_id ? users[thread.owner_id] : undefined;
   return <div className="chat-start">
     <div className="chat-start-icon"><MessageSquareText size={42} /></div>
-    <h1>{thread.name}</h1>
+    <h2 className="chat-start-title">{thread.name}</h2>
     <p>{owner ? <>Started by <b>{chat.nameOf(owner)}</b></> : 'This is the start of the thread.'}</p>
   </div>;
 }

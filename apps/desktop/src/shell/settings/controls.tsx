@@ -33,7 +33,8 @@ export function Toggle({ checked, onChange, disabled, label, describedBy }: { ch
 export function SwitchRow({ label, note, checked, onChange, disabled }: { label: string; note?: ReactNode; checked: boolean; onChange(next: boolean): void; disabled?: boolean }) {
   const noteId = useId();
   return (
-    <div className={`switch-row${disabled ? " disabled" : ""}`}>
+    // aria-disabled marks the dimmed text as part of an inactive control (WCAG 1.4.3 exempts it; axe reads the attribute).
+    <div className={`switch-row${disabled ? " disabled" : ""}`} aria-disabled={disabled || undefined}>
       <div className="switch-row-text">
         <div className="switch-row-label">{label}</div>
         {note && <div className="switch-row-note" id={noteId}>{note}</div>}

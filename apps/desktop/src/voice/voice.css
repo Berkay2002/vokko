@@ -7,6 +7,16 @@
 }
 
 /* ---- voice channel row ---- */
+.voice-row-main {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  align-self: stretch;
+  border-radius: var(--radius-sm);
+}
+
 .channel-row.voice.connected .channel-icon {
   color: var(--icon-voice-connected);
 }
@@ -19,7 +29,7 @@
 .channel-row.voice.has-status {
   height: auto;
   flex-wrap: wrap;
-  padding-bottom: 6px;
+  padding-bottom: 2px;
   row-gap: 0;
 }
 
@@ -29,6 +39,7 @@
   align-items: center;
   gap: 4px;
   min-width: 0;
+  min-height: 24px; /* WCAG 2.2 target size; the row's bottom padding gives back most of the extra height */
   padding-left: 28px;
   color: var(--text-muted);
   font-size: 12px;

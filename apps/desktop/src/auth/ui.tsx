@@ -39,7 +39,7 @@ export function Field({ label, error, required, children, hint }: { label: strin
 export function Frame({ title, subtitle, children, footer }: { title: string; subtitle?: ReactNode; children: ReactNode; footer?: ReactNode }) {
   return (
     <div className="auth-page">
-      <div className="auth-card">
+      <main className="auth-card">
         <div className="auth-header">
           <img className="auth-logo" src={logo} alt="" width={48} height={48} />
           <h1>{title}</h1>
@@ -47,7 +47,7 @@ export function Frame({ title, subtitle, children, footer }: { title: string; su
         </div>
         {children}
         {footer && <div className="auth-footer">{footer}</div>}
-      </div>
+      </main>
     </div>
   );
 }
