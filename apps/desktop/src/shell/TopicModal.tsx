@@ -19,7 +19,7 @@ export function TopicModal({ channelId }: { channelId: Snowflake }) {
   const [link, setLink] = useState<string | null>(null);
   // Links ask first ("Leaving Vokko"), like in the chat.
   const actions = useMemo<ChatActions>(
-    () => ({ reply() {}, edit() {}, requestDelete() {}, togglePin() {}, react() {}, openImage() {}, viewAttachment() {}, deleteAttachment() {}, viewReactions() {}, jumpTo() {}, openLink: setLink }),
+    () => ({ reply() {}, edit() {}, requestDelete() {}, togglePin() {}, react() {}, openImage() { return false; }, viewAttachment() {}, deleteAttachment() {}, viewReactions() {}, jumpTo() {}, openLink: setLink }),
     [],
   );
   if (!channel?.topic) return null;

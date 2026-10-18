@@ -7,13 +7,17 @@ import { Avatar } from './Avatar';
 import { ServerTag } from './ServerTag';
 import { AnimatedImage, Tooltip, resolveUrl, useShowImageDescriptions } from './shell';
 import { openForward } from '../media/store';
-import { formatBytes, formatFullDate, formatMessageTimestamp, isSpoilerName } from './util';
+import { formatBytes, formatFullDate, formatMessageTimestamp, stripSpoiler } from './util';
 import { VoicePlayer, isVoiceMessage } from './VoiceMessage';
 import { TextPreview } from './TextPreview';
 import { isTextPreviewable } from './textAttachment';
 import { saveOnClick } from './mediaActions';
+import { revealSpoiler, useIsCovered } from './spoilers';
 import { RESET, type View } from './lightboxZoom';
 import { useViewerGestures } from './useViewerGestures';
+
+/** A link preview's picture shown in the viewer as a stand-in attachment (Embeds.tsx): it has no message file to forward. */
+export const isEmbedImage = (a: Attachment): boolean => a.id.startsWith('embed:');
 
 export const isImage = (a: Attachment): boolean => !!a.content_type?.startsWith('image/') || /\.(png|jpe?g|gif|webp|avif|svg|bmp)$/i.test(a.filename);
 const isVideo = (a: Attachment): boolean => !!a.content_type?.startsWith('video/');
@@ -37,15 +41,14 @@ function fileIcon(a: Attachment) {
 
 function ImageTile({ message, attachment, index, style, className }: { message: Message; attachment: Attachment; index: number; style?: React.CSSProperties; className?: string }) {
   const chat = useChat();
-  const [spoiled, setSpoiled] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
-  const spoiler = isSpoilerName(attachment.filename) && !spoiled && !chat.revealSpoilers;
+  const spoiler = useIsCovered()(attachment);
   const own = message.author.id === chat.me.id && !message.id.startsWith('pending:');
   const url = resolveUrl(attachment.url);
   return <div className={`chat-image-wrap${className ? ` ${className}` : ''}`} style={style}>
     <button type="button" className={`chat-image${spoiler ? ' spoiler' : ''}${loaded ? ' loaded' : ''}${failed ? ' failed' : ''}`} aria-label={`Open image ${(!spoiler && attachment.description) || attachment.filename}`} data-src={url}
-      onClick={() => (spoiler ? setSpoiled(true) : chat.actions.openImage(message, index))}>
+      onClick={() => (spoiler ? revealSpoiler(attachment.id) : chat.actions.openImage(message, index))}>
       {isAnimatable(attachment)
         ? <AnimatedImage kind="gif" src={url} alt={attachment.description || attachment.filename} loading="lazy" draggable={false} onLoad={() => setLoaded(true)} onError={() => setFailed(true)} />
         : <img src={url} alt={attachment.description || attachment.filename} loading="lazy" draggable={false} onLoad={() => setLoaded(true)} onError={() => setFailed(true)} />}
@@ -118,6 +121,7 @@ export function PendingUpload({ files, onCancel }: { files: Attachment[]; onCanc
 export function Attachments({ message }: { message: Message }) {
   const chat = useChat();
   const showDescriptions = useShowImageDescriptions();
+  const covered = useIsCovered();
   if (message.attachments.length === 0) return null;
   if (isVoiceMessage(message) && message.attachments[0]) return <div className="chat-attachments"><VoicePlayer attachment={message.attachments[0]} /></div>;
   // Settings > Chat > "Display images, videos and lolcats": off shows every upload as a file card.
@@ -128,24 +132,44 @@ export function Attachments({ message }: { message: Message }) {
   return <div className="chat-attachments">
     {images.length > 0 && <ImageGrid message={message} images={images} />}
     {others.map(a => inline && isVideo(a)
-      ? <video key={a.id} className="chat-video" src={resolveUrl(a.url)} controls preload="metadata" />
+      ? <VideoAttachment key={a.id} attachment={a} />
       : <FileCard key={a.id} attachment={a} />)}
-    {showDescriptions && message.attachments.filter(a => a.description).map(a => <p key={a.id} className="chat-attachment-alt"><span className="chat-attachment-alt-tag">ALT</span>{a.description}</p>)}
+    {showDescriptions && message.attachments.filter(a => a.description && !covered(a)).map(a => <p key={a.id} className="chat-attachment-alt"><span className="chat-attachment-alt-tag">ALT</span>{a.description}</p>)}
+  </div>;
+}
+
+/** A video upload. Behind a SPOILER_ name the frame is blurred, has no controls and nothing plays until the cover is clicked. */
+function VideoAttachment({ attachment }: { attachment: Attachment }) {
+  const covered = useIsCovered()(attachment);
+  const url = resolveUrl(attachment.url);
+  if (!covered) return <video className="chat-video" src={url} controls preload="metadata" />;
+  return <div className="chat-video-wrap">
+    <video className="chat-video spoiler" src={url} preload="metadata" aria-hidden="true" tabIndex={-1} />
+    <button type="button" className="chat-spoiler-cover" aria-label="Reveal spoiler video" onClick={() => revealSpoiler(attachment.id)}><span className="chat-image-spoiler-label">SPOILER</span></button>
   </div>;
 }
 
 export function FileCard({ attachment, plain }: { attachment: Attachment; plain?: boolean }) {
+  const covered = useIsCovered()(attachment);
   if (!plain && isTextPreviewable(attachment)) return <TextPreview attachment={attachment}><FileCard attachment={attachment} plain /></TextPreview>;
   const Icon = fileIcon(attachment);
   const audio = isAudio(attachment);
+  const shown = stripSpoiler(attachment.filename);
+  // Covered: no name, size, link or player in the page at all until the click.
+  if (covered) {
+    return <button type="button" className="chat-file spoiler" aria-label="Reveal spoiler file" onClick={() => revealSpoiler(attachment.id)}>
+      <Icon className="chat-file-icon" size={40} aria-hidden="true" />
+      <span className="chat-file-spoiler">SPOILER</span>
+    </button>;
+  }
   return <div className={`chat-file${audio ? ' audio' : ''}`}>
     <Icon className="chat-file-icon" size={40} aria-hidden="true" />
     <div className="chat-file-meta">
-      <a className="chat-file-name" href={resolveUrl(attachment.url)} target="_blank" rel="noopener noreferrer" title={attachment.filename}>{attachment.filename}</a>
+      <a className="chat-file-name" href={resolveUrl(attachment.url)} target="_blank" rel="noopener noreferrer" title={shown}>{shown}</a>
       <span className="chat-file-size">{formatBytes(attachment.size)}</span>
     </div>
-    <a className="chat-file-download" href={resolveUrl(attachment.url)} download={attachment.filename} aria-label={`Download ${attachment.filename}`} title="Download" onClick={saveOnClick(resolveUrl(attachment.url), attachment.filename)}><Download size={24} /></a>
-    {audio && <audio className="chat-audio" src={resolveUrl(attachment.url)} controls preload="metadata" aria-label={attachment.filename} />}
+    <a className="chat-file-download" href={resolveUrl(attachment.url)} download={attachment.filename} aria-label={`Download ${shown}`} title="Download" onClick={saveOnClick(resolveUrl(attachment.url), attachment.filename)}><Download size={24} /></a>
+    {audio && <audio className="chat-audio" src={resolveUrl(attachment.url)} controls preload="metadata" aria-label={shown} />}
   </div>;
 }
 
@@ -159,6 +183,7 @@ export function Lightbox({ message, index, onClose }: { message: Message; index:
   const stage = useRef<HTMLDivElement>(null);
   const img = useRef<HTMLImageElement>(null);
   const cur = images[i];
+  const covered = useIsCovered();
   const go = (n: number) => { setI(Math.max(0, Math.min(images.length - 1, n))); setView(RESET); };
   const zoomed = view.scale > 1;
   const gestures = useViewerGestures({ stage, image: img, view, setView, canSwipe: images.length > 1, step: d => go(i + d) });
@@ -172,11 +197,12 @@ export function Lightbox({ message, index, onClose }: { message: Message; index:
     return () => window.removeEventListener('keydown', key);
   }, [images.length, onClose, more]);
   if (!cur) return null;
+  const hidden = covered(cur); // an unrevealed SPOILER_ picture: blurred, no zoom, no link to the original, no description
   const author = chat.userById(message.author.id) ?? message.author;
   const color = chat.colorOf(message);
   const url = resolveUrl(cur.url);
   const date = new Date(message.timestamp);
-  return createPortal(<div className="chat-lightbox" role="dialog" aria-modal="true" aria-label={cur.description || cur.filename} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+  return createPortal(<div className="chat-lightbox" role="dialog" aria-modal="true" aria-label={(!hidden && cur.description) || cur.filename} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
     <div className="chat-lightbox-modal" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
       <header className="chat-lightbox-top">
         <Avatar user={message.author} size={40} guildId={chat.guildId} />
@@ -185,26 +211,27 @@ export function Lightbox({ message, index, onClose }: { message: Message; index:
           <Tooltip content={formatFullDate(date)} side="bottom"><time className="chat-lightbox-time" dateTime={message.timestamp}>{formatMessageTimestamp(date)}</time></Tooltip>
         </div>
         <div className="chat-lightbox-actions" role="toolbar" aria-label="Image actions">
-          <Tooltip content={zoomed ? 'Zoom out' : 'Zoom in'} side="bottom"><button type="button" className="chat-lightbox-btn" aria-label={zoomed ? 'Zoom out' : 'Zoom in'} aria-pressed={zoomed} onClick={() => setView(v => (v.scale > 1 ? RESET : { ...v, scale: 2 }))}><ZoomIn size={20} /></button></Tooltip>
-          <Tooltip content="Forward" side="bottom"><button type="button" className="chat-lightbox-btn" aria-label="Forward" onClick={() => openForward(message)}><Forward size={20} /></button></Tooltip>
-          <Tooltip content="Open in Browser" side="bottom"><a className="chat-lightbox-btn" href={url} target="_blank" rel="noopener noreferrer" aria-label="Open in Browser"><ExternalLink size={20} /></a></Tooltip>
-          <div className="chat-lightbox-more">
+          {!hidden && <Tooltip content={zoomed ? 'Zoom out' : 'Zoom in'} side="bottom"><button type="button" className="chat-lightbox-btn" aria-label={zoomed ? 'Zoom out' : 'Zoom in'} aria-pressed={zoomed} onClick={() => setView(v => (v.scale > 1 ? RESET : { ...v, scale: 2 }))}><ZoomIn size={20} /></button></Tooltip>}
+          {!isEmbedImage(cur) && <Tooltip content="Forward" side="bottom"><button type="button" className="chat-lightbox-btn" aria-label="Forward" onClick={() => openForward(message)}><Forward size={20} /></button></Tooltip>}
+          {!hidden && <Tooltip content="Open in Browser" side="bottom"><a className="chat-lightbox-btn" href={url} target="_blank" rel="noopener noreferrer" aria-label="Open in Browser"><ExternalLink size={20} /></a></Tooltip>}
+          {!hidden && <div className="chat-lightbox-more">
             <Tooltip content="More" side="bottom"><button type="button" className="chat-lightbox-btn" aria-label="More" aria-expanded={more} onClick={() => setMore(m => !m)}><MoreHorizontal size={20} /></button></Tooltip>
             {more && <div className="chat-lightbox-menu" role="menu">
               <a role="menuitem" href={url} download={cur.filename} onClick={e => { saveOnClick(url, cur.filename)(e); setMore(false); }}><Download size={16} /> Download</a>
               <button type="button" role="menuitem" onClick={() => { void navigator.clipboard?.writeText(url); setMore(false); }}><Link2 size={16} /> Copy Link</button>
             </div>}
-          </div>
+          </div>}
         </div>
         <button type="button" className="chat-lightbox-close" aria-label="Close" onClick={onClose}><X size={20} /></button>
       </header>
       <div ref={stage} className={`chat-lightbox-stage${images.length > 1 ? ' with-thumbs' : ''}`} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
         {i > 0 && <button type="button" className="chat-lightbox-nav prev" aria-label="Previous" onClick={() => go(i - 1)}><ArrowLeft size={20} /></button>}
-        <img ref={img} className={`${zoomed ? 'zoomed' : ''}${gestures.dragging ? ' dragging' : ''}`} style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }} src={url} alt={cur.description || cur.filename} draggable={false} onClick={e => gestures.toggle(e.clientX, e.clientY)} />
+        <img ref={img} className={`${zoomed ? 'zoomed' : ''}${gestures.dragging ? ' dragging' : ''}${hidden ? ' spoiler' : ''}`} style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }} src={url} alt={(!hidden && cur.description) || cur.filename} draggable={false} onClick={e => (hidden ? revealSpoiler(cur.id) : gestures.toggle(e.clientX, e.clientY))} />
+        {hidden && <button type="button" className="chat-lightbox-spoiler" aria-label="Reveal spoiler" onClick={() => revealSpoiler(cur.id)}>SPOILER</button>}
         {i < images.length - 1 && <button type="button" className="chat-lightbox-nav next" aria-label="Next" onClick={() => go(i + 1)}><ArrowRight size={20} /></button>}
       </div>
       {images.length > 1 && <ul className="chat-lightbox-thumbs" aria-label="Images">
-        {images.map((a, n) => <li key={a.id}><button type="button" className={n === i ? 'current' : undefined} aria-label={`Image ${n + 1} of ${images.length}${n === i ? ' (current)' : ''}`} onClick={() => go(n)}><img src={resolveUrl(a.url)} alt="" draggable={false} /></button></li>)}
+        {images.map((a, n) => <li key={a.id}><button type="button" className={n === i ? 'current' : undefined} aria-label={`Image ${n + 1} of ${images.length}${n === i ? ' (current)' : ''}`} onClick={() => go(n)}><img className={covered(a) ? 'spoiler' : undefined} src={resolveUrl(a.url)} alt="" draggable={false} /></button></li>)}
       </ul>}
     </div>
   </div>, document.body);

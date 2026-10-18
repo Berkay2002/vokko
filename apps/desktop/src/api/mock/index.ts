@@ -5,10 +5,11 @@ import { MOCK } from "../config";
 import { MAX_UPLOAD_BYTES } from "../limits";
 import { ApiRequestError, RateLimitedError } from "../errors";
 import { snowflakeToTimestamp } from "../snowflake";
-import type { Attachment, GifProvider, PresenceStatus, UserSettings, UserSettingsData } from "../types";
+import type { Attachment, Embed, GifProvider, PresenceStatus, UserSettings, UserSettingsData } from "../types";
 import { db, nextId } from "./db";
 import { seedOnboardingGuild, type SeededGuild } from "./community";
-import { addMessage, createAccount } from "./ops";
+import { addMessage, channelAudience, createAccount, requireMessage } from "./ops";
+import { messageFor } from "./views";
 import { handleRoute } from "./routes";
 import { apps, executeWebhook, installEchoBot, setInternalRouter } from "./apps";
 import "./accounts";
@@ -168,6 +169,8 @@ interface MockHooks {
   playSound(username: string, soundId: string, sourceGuildId?: string): void;
   /** Another user sets (or with null clears) their global entrance sound. */
   entranceSound(username: string, soundId: string | null, sourceGuildId?: string): void;
+  /** Gives a message link previews, as the server's unfurler would (the mock has none); MESSAGE_UPDATE goes out. */
+  setEmbeds(channelId: string, messageId: string, embeds: Embed[]): void;
   /** Calls a REST route as another user (their gateway events still reach their sockets); the result is a JSON copy. */
   requestAs(username: string, method: string, path: string, body?: unknown): unknown;
   /** Called with every game relay send in this page's mock (sender's username, data, `to` app id); null removes it. */
@@ -260,6 +263,13 @@ const hooks: MockHooks = {
   maintenance: (message, startsAt = null) => {
     setMockMaintenance(message ? { message, starts_at: startsAt } : null);
     window.dispatchEvent(new Event("vokko:status-changed"));
+  },
+  setEmbeds: (channelId, messageId, embeds) => {
+    const channel = db.channels.get(channelId);
+    if (!channel) throw new Error("no such channel");
+    const message = requireMessage(channelId, messageId);
+    message.embeds = embeds;
+    for (const id of channelAudience(channel)) emit([id], "MESSAGE_UPDATE", messageFor(message, id));
   },
   requestAs: (username, method, path, body) => {
     const result = handleRoute(method, path, body ?? null, userByName(username));

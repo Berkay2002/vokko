@@ -1,18 +1,18 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  AppWindow, Bell, ChartBarBig, Bookmark, ChevronLeft, ChevronRight, Copy, CornerUpLeft, Download, ExternalLink, Fingerprint, Flag, Forward, Link2, MailOpen, Megaphone, MessageSquareText, Pencil, Pin, PinOff, SmilePlus, Trash2, Volume2,
+  AppWindow, Bell, ChartBarBig, Bookmark, ChevronLeft, ChevronRight, Copy, CornerUpLeft, Download, ExternalLink, EyeOff, Fingerprint, Flag, Forward, Link2, MailOpen, Megaphone, MessageSquareText, Pencil, Pin, PinOff, SmilePlus, Trash2, Volume2,
 } from 'lucide-react';
 import { MessageType } from '../api/types';
 import type { Message } from '../api/types';
 import { useChat } from './ChatContext';
 import { emojiShortcodeLabel, frequentEmoji, quickReactions, useEmojiDb } from './emojiData';
 import { messageStore } from './messageStore';
-import { isSystemMessage, type PendingMessage } from './messageState';
+import { canSuppressEmbeds, embedsSuppressed, isSystemMessage, type PendingMessage } from './messageState';
 import { toDisplay } from './mentionText';
 import { BottomSheet, copyText, isDeveloperMode, messageLink, openModal, resolveUrl, useLayer, useOutsideClose, usePhone } from './shell';
 import { fileNameFromUrl, type MediaTarget } from './mediaTarget';
-import { copyImage, saveMedia } from './mediaActions';
+import { copyImage, removeEmbeds, saveMedia } from './mediaActions';
 import { comingSoon } from './toast';
 import { ReminderMenu } from '../media/ReminderMenu';
 import { openForward, toggleBookmark, useIsBookmarked } from '../media/store';
@@ -167,6 +167,11 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
           speechSynthesis.speak(new SpeechSynthesisUtterance(plain));
         },
       });
+    }
+    const canRemoveEmbeds = !pending && !!message.embeds?.length && !embedsSuppressed(message) && canSuppressEmbeds(message, chat.me.id, chat.canManage);
+    if (canRemoveEmbeds) {
+      sep();
+      out.push({ id: 'remove-embeds', label: 'Remove All Embeds', icon: <EyeOff size={ICON} />, onSelect: () => removeEmbeds(message) });
     }
     const canReport = !isMine && !system && !pending;
     if (canDelete || canReport) sep();

@@ -1,5 +1,7 @@
 import type { MouseEvent } from 'react';
+import type { Message } from '../api/types';
 import { onDesktopEvent } from '../desktop/tauri';
+import { messageStore } from './messageStore';
 import { chatToast } from './toast';
 
 /** The desktop shell saves downloads into the Downloads folder (src-tauri downloads.rs) and says how it went. */
@@ -41,6 +43,11 @@ export const saveOnClick = (url: string, filename: string) => (e: MouseEvent) =>
   e.preventDefault();
   void saveMedia(url, filename);
 };
+
+/** Remove All Embeds, and the X on a link preview: switches the message's previews off. */
+export function removeEmbeds(message: Message): void {
+  messageStore.suppressEmbeds(message.channel_id, message).catch(() => chatToast('Could not remove the embeds.'));
+}
 
 /** Re-encodes any picture the browser can decode as PNG, the one image type every clipboard accepts. */
 async function toPng(blob: Blob): Promise<Blob> {
