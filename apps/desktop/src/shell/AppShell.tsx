@@ -226,6 +226,17 @@ export function AppShell() {
     if (link && link.getAttribute("href") === window.location.pathname) useNavDrawer.getState().setOpen(false);
   };
 
+  // A channel picked in the open list page replaces the entry the server tap pushed (the rail lands on that server's first channel), so back from
+  // the channel and back again reach where the tap came from instead of the first channel nobody picked.
+  const replaceListPick = (e: React.MouseEvent) => {
+    if (!narrow || !navOpen || !guildId || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    const target = e.target as HTMLElement;
+    const href = target.closest("button") ? null : target.closest("a[href]")?.getAttribute("href");
+    if (!href?.startsWith(`/channels/${guildId}/`) || href === window.location.pathname) return;
+    e.preventDefault();
+    void navigate(href, { replace: true });
+  };
+
   // Keyboard shortcuts owned by the shell (the table is in src/keyboard/bindings.ts).
   const go = (p: Place | undefined) => (p ? (void navigate(p.guildId ? `/channels/${p.guildId}/${p.channelId}` : `/channels/@me/${p.channelId}`), true) : false);
   const dirOf = (i: number) => (i === 0 ? -1 : 1);
@@ -296,7 +307,7 @@ export function AppShell() {
         {narrow && navOpen && <h1 className="sr-only">{guild?.name ?? "Direct Messages"}</h1>}
         <Rail />
         {/* Discord's names for the list column; it holds the user panel too. */}
-        <nav className="sidebar" aria-label={guild ? `${guild.name} (server)` : "Private channels"} onClick={leaveListOnSameRoute}>
+        <nav className="sidebar" aria-label={guild ? `${guild.name} (server)` : "Private channels"} onClick={leaveListOnSameRoute} onClickCapture={replaceListPick}>
           <Sidebar guild={guild} />
         </nav>
         {/* Pointer-only drag handle with nothing to say to a screen reader. */}

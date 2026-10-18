@@ -355,3 +355,18 @@ test.describe('desktop 1440', () => {
     await shot(page, 'role-editor-1440');
   });
 });
+
+test('back from a channel opened through a server lands on Home, never on the server\'s first channel', async ({ page }) => {
+  await home(page);
+  await page.getByRole('link', { name: /^Sam's server/ }).tap();
+  await page.getByRole('link', { name: /^general/ }).first().tap();
+  await page.locator('.chat-msg').first().waitFor();
+  await shot(page, 'back-1-channel-390');
+  await page.goBack(); // the channel's overlay entry: back to the server's channel list
+  await expect(page.locator('.channel-chat')).toBeHidden();
+  await expect(page).toHaveURL(/\/channels\/\d+\/\d+/);
+  await shot(page, 'back-2-list-390');
+  await page.goBack(); // the list page itself: Home
+  await expect(page).toHaveURL(/\/channels\/@me/);
+  await shot(page, 'back-3-home-390');
+});

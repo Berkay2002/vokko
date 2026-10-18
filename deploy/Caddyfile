@@ -41,6 +41,8 @@
 		try_files {path} /index.html
 		file_server
 		header /assets/* Cache-Control "public, max-age=31536000, immutable"
+		# Not every file_server MIME table maps .webmanifest; browsers want the manifest type.
+		header /manifest.webmanifest Content-Type application/manifest+json
 		# The web app's CSP, matching the packaged app's (release.production.json). frame-src https: because admins add game
 		# origins at runtime (docs/design/games-host.md section 7). Not on pages other pages frame: the Watch Together embed
 		# (loads YouTube's script, framed by the desktop app), the website game frame (framed by the macOS/Linux app, frames the
