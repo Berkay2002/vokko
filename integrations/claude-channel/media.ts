@@ -5,7 +5,7 @@
  * Every request is made as the member who asked: it carries `X-Vokko-Acting-For: <their message id>`, and the server runs
  * it with that member's rights, call and Stremio addons. Tools never take a channel id: the call is looked up from the
  * asker (their voice state in a server, the DM channel itself in a DM). The message id is never the model's to choose:
- * the bridge passes the message it is answering, and the plugin only accepts the newest message it delivered in a channel (within 10 minutes).
+ * the bridge passes the message it is answering, and the plugin only accepts the newest message it delivered (in any channel, within 10 minutes).
  *
  * No zod here (each package has its own): tools are plain specs and the callers build zod shapes or JSON Schema from them.
  * Requests don't go through VokkoBot.api (its path check is for chat ids; it retries 429, which would spend the
@@ -437,19 +437,15 @@ export const ASKED_TTL_MS = 10 * 60_000
 
 export class AskedMessages {
   private readonly seen = new Map<string, { who: Asker; at: number }>()
-  /** channel id → the newest delivered message there. */
-  private readonly latest = new Map<string, string>()
+  /** The newest delivered message, in any channel. */
+  private latestId = ''
   constructor(private readonly now: () => number = Date.now) {}
 
   note(who: Asker): void {
     const t = this.now()
-    for (const [id, v] of this.seen) {
-      if (t - v.at <= ASKED_TTL_MS) continue
-      this.seen.delete(id)
-      if (this.latest.get(v.who.channelId) === id) this.latest.delete(v.who.channelId)
-    }
+    for (const [id, v] of this.seen) if (t - v.at > ASKED_TTL_MS) this.seen.delete(id)
     this.seen.set(who.messageId, { who, at: t })
-    this.latest.set(who.channelId, who.messageId)
+    this.latestId = who.messageId
   }
 
   /** A delivered message from the last 10 minutes, null if unknown or too old. */
@@ -458,9 +454,9 @@ export class AskedMessages {
     return v && this.now() - v.at <= ASKED_TTL_MS ? v.who : null
   }
 
-  /** Only the newest message of a channel may be acted for: with an older id the session (or text planted in a message) could act as an earlier member. */
+  /** Only the newest delivered message (in any channel) may be acted for: an older id, or one from another channel, would let the session (or text planted in a message) act as someone else. */
   isLatest(who: Asker): boolean {
-    return this.latest.get(who.channelId) === who.messageId
+    return this.latestId === who.messageId
   }
 }
 
@@ -468,6 +464,6 @@ export class AskedMessages {
 export async function runForMessage(asked: AskedMessages, cfg: MediaConfig, name: string, args: Args): Promise<string> {
   const who = asked.find(args.message_id)
   if (!who) return 'message_id must be the message_id of a Vokko message you were sent in the last 10 minutes (the one that asked).'
-  if (!asked.isLatest(who)) return 'That request is no longer the latest in this channel; a newer message came in after it. Act on the newest message only.'
+  if (!asked.isLatest(who)) return 'That request is no longer the latest; a newer message came in after it. Act on the newest message only.'
   return runMediaTool(cfg, who, name, args)
 }

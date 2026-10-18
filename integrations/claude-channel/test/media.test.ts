@@ -271,19 +271,25 @@ describe('the plugin only acts for messages it delivered', () => {
     asked.note(DM_ASKER)
     asked.note(other)
     routes['GET /channels/555/spotify'] = () => Response.json(state)
-    expect(await runForMessage(asked, CFG, 'spotify_now', { message_id: MSG })).toContain('no longer the latest in this channel')
+    expect(await runForMessage(asked, CFG, 'spotify_now', { message_id: MSG })).toContain('no longer the latest')
     expect(hits).toEqual([])
     expect(await runForMessage(asked, CFG, 'spotify_now', { message_id: '7002' })).toContain('Playing: "Song"')
     expect(hits[0]!.headers['X-Vokko-Acting-For']).toBe('7002')
   })
 
-  test('the newest message is tracked per channel: another channel does not supersede it', async () => {
+  test('the newest message is global: once a newer one arrives in any channel, an id from another channel is refused', async () => {
     const asked = new AskedMessages()
-    const elsewhere: Asker = { ...GUILD_ASKER, messageId: '7005' }
+    const elsewhere: Asker = { ...GUILD_ASKER, messageId: '7005', authorId: '301' }
     asked.note(DM_ASKER)
     asked.note(elsewhere)
     routes['GET /channels/555/spotify'] = () => Response.json(state)
-    expect(await runForMessage(asked, CFG, 'spotify_now', { message_id: MSG })).toContain('Playing: "Song"')
+    expect(await runForMessage(asked, CFG, 'spotify_now', { message_id: MSG })).toContain('no longer the latest')
+    expect(hits).toEqual([])
+    routes['GET /guilds/900/voice-states/301'] = () => Response.json({ channel_id: VOICE })
+    routes[`GET /channels/${VOICE}/spotify`] = () => Response.json(state)
+    expect(await runForMessage(asked, CFG, 'spotify_now', { message_id: '7005' })).toContain('Playing: "Song"')
+    asked.note(DM_ASKER) // the DM message is newest again; the guild one is now refused
+    expect(await runForMessage(asked, CFG, 'spotify_now', { message_id: '7005' })).toContain('no longer the latest')
   })
 
   test('when the newest message expires, an older one in the same channel is not revived', async () => {
