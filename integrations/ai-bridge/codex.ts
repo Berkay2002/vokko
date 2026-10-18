@@ -17,13 +17,16 @@
  * login, so it isn't relied on here.
  */
 
-import { Codex, type ThreadOptions } from '@openai/codex-sdk'
+import { Codex, type ModelReasoningEffort, type ThreadOptions } from '@openai/codex-sdk'
 import { execFileSync } from 'child_process'
 import { mkdirSync, writeFileSync } from 'fs'
 import { createRequire } from 'module'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import { UserFacingError, childEnv, type Answer, type Backend } from './core.ts'
+
+/** What the owner may pick (Codex's model_reasoning_effort): chat needs little reasoning. */
+export const CODEX_EFFORTS = ['low', 'medium', 'high'] as const satisfies readonly ModelReasoningEffort[]
 
 export const NOT_SIGNED_IN = "Codex isn't signed in on the host: run `codex login`"
 
@@ -147,6 +150,8 @@ export type CodexOptions = {
   workDir: string
   botName: string
   model?: string
+  /** Default `low`. */
+  effort?: string
   codexPath?: string
   /** Swappable in tests: the SDK's Codex class and the CLI's listings. */
   Codex?: new (o: ConstructorParameters<typeof Codex>[0]) => Pick<Codex, 'startThread' | 'resumeThread'>
@@ -170,20 +175,34 @@ export function codexBackend(opts: CodexOptions): Backend {
   const configOverrides = [...leanOverrides(listers), `model_catalog_json=${JSON.stringify(catalog)}`]
   const Impl = opts.Codex ?? Codex
   const codex = new Impl({ codexPathOverride: opts.codexPath, env, configOverrides })
-  const threadOptions: ThreadOptions = {
-    workingDirectory: opts.workDir,
-    skipGitRepoCheck: true,
-    sandboxMode: 'read-only',
-    networkAccessEnabled: false,
-    webSearchMode: 'disabled',
-    approvalPolicy: 'never',
-    model,
-  }
+  const cur = { model, effort: opts.effort ?? 'low' }
   return {
     name: 'codex',
     metered: false,
     allowlistedOnly: true,
+    tune: {
+      efforts: CODEX_EFFORTS,
+      modelHint: '<model id>',
+      get: () => ({ ...cur }),
+      resolveModel(input) {
+        const m = input.trim()
+        if (!listed.some(l => l.slug === m)) throw new UserFacingError(`Codex's model catalog doesn't list "${m}". Listed: ${listed.map(l => l.slug).join(', ')}`)
+        return m
+      },
+      set: s => void Object.assign(cur, s),
+    },
     async ask(threadId, prompt): Promise<Answer> {
+      // Read per turn, so a changed model or effort reaches resumed threads too.
+      const threadOptions: ThreadOptions = {
+        workingDirectory: opts.workDir,
+        skipGitRepoCheck: true,
+        sandboxMode: 'read-only',
+        networkAccessEnabled: false,
+        webSearchMode: 'disabled',
+        approvalPolicy: 'never',
+        model: cur.model,
+        modelReasoningEffort: cur.effort as ModelReasoningEffort,
+      }
       const thread = threadId ? codex.resumeThread(threadId, threadOptions) : codex.startThread(threadOptions)
       let turn
       try {

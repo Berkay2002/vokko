@@ -1,10 +1,11 @@
 import { describe, expect, test, beforeEach } from 'bun:test'
-import { mkdtempSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { MODERATE_MEMBERS, OWNER_COMMAND_RE, VokkoBot, type Access, type Message, type Role as BotRole } from '../../claude-channel/vokko.ts'
 import { BackendError, Bridge, SESSION_MAX_TURNS, UserFacingError, childEnv, parseUserId, type Answer, type Backend, type BotLike, type TurnContext } from '../core.ts'
 import { PauseStore, decide, type PauseRequest } from '../pauses.ts'
+import { claudeApiBackend } from '../claude-api.ts'
 
 const OWNER = '100'
 const BOT = '200'
@@ -609,6 +610,73 @@ describe('owner and moderator commands', () => {
     s.setAccess({ ...s.access(), guilds: false, groups: { [GENERAL]: { requireMention: true, allowFrom: [NAT] } } })
     await s.bridge.handle(msg(MOD, `!pause <@${EVE}> 15`, { guild: GUILD })) // not on the channel's allowFrom
     expect(s.bridge.pauses.list(s.clock.now()).length).toBe(0)
+  })
+})
+
+describe('!model and !effort', () => {
+  const OK = { type: 'result', subtype: 'success', is_error: false, result: 'hi', session_id: 'S1', total_cost_usd: 0.01, modelUsage: {} }
+  function tuned(w = world(), opts: { model?: string; effort?: string } = {}) {
+    const seen: any[] = []
+    const query = ((p: { options: any }) => {
+      seen.push(p.options)
+      return (async function* () {
+        yield OK
+      })()
+    }) as any
+    const backend = claudeApiBackend({ apiKey: 'k', model: 'sonnet', maxOutputTokens: 100, workDir: join(w.stateDir, 'w'), configDir: join(w.stateDir, 'c'), botName: 'Claude', ownerId: () => OWNER, webSearch: false, maxReplyUsd: 0.5, query, ...opts })
+    const bridge = new Bridge(w.bot as unknown as BotLike, backend, { perHour: 20, monthlyUsd: 150 })
+    return { ...w, backend, bridge, seen, last: () => w.sent[w.sent.length - 1] }
+  }
+  const file = (w: { stateDir: string }) => join(w.stateDir, 'settings-claude-api.json')
+
+  test('defaults reach the SDK; the owner changes both, the next turn uses them, and a restart keeps them', async () => {
+    const s = tuned()
+    await s.bridge.handle(msg(NAT, 'hi'))
+    expect(s.seen[0]).toMatchObject({ model: 'claude-sonnet-5-5', effort: 'low' })
+    await s.bridge.handle(msg(OWNER, '!model'))
+    expect(s.last().text).toContain('model: claude-sonnet-5-5')
+    await s.bridge.handle(msg(OWNER, '!model haiku'))
+    expect(s.last().text).toContain('model is now claude-haiku-5-5')
+    await s.bridge.handle(msg(OWNER, '!effort HIGH'))
+    expect(s.last().text).toContain('effort is now high')
+    await s.bridge.handle(msg(OWNER, '!effort'))
+    expect(s.last().text).toContain('effort: high')
+    await s.bridge.handle(msg(NAT, 'again'))
+    expect(s.seen[1]).toMatchObject({ model: 'claude-haiku-5-5', effort: 'high', resume: 'S1' })
+    expect(JSON.parse(readFileSync(file(s), 'utf8'))).toEqual({ model: 'claude-haiku-5-5', effort: 'high' })
+    if (process.platform !== 'win32') expect(statSync(file(s)).mode & 0o777).toBe(0o600)
+
+    // a restart: new backend from the env defaults, the saved choice overrides them
+    const again = tuned(s, { model: 'claude-sonnet-5-5', effort: 'low' })
+    await again.bridge.handle(msg(NAT, 'back'))
+    expect(again.seen[0]).toMatchObject({ model: 'claude-haiku-5-5', effort: 'high' })
+  })
+
+  test('refused: a bad value changes nothing; so do non-owners and moderators', async () => {
+    const s = tuned()
+    for (const bad of ['!effort xhigh', '!effort max', '!effort turbo', '!model gpt-5', '!model ../x']) {
+      await s.bridge.handle(msg(OWNER, bad))
+      expect(s.last().text).toMatch(/Usage/)
+    }
+    expect(existsSync(file(s))).toBe(false)
+    await s.bridge.handle(msg(NAT, '!model haiku')) // a member's DM is an ordinary message
+    await s.bridge.handle(msg(MOD, '!effort high', { guild: GUILD }))
+    await s.bridge.handle(msg(MOD, '!model haiku', { guild: GUILD }))
+    expect(existsSync(file(s))).toBe(false)
+    expect(s.backend.tune!.get()).toEqual({ model: 'claude-sonnet-5-5', effort: 'low' })
+  })
+
+  test('a saved value that is no longer valid is skipped at startup, the env default stands', () => {
+    const w = world()
+    writeFileSync(file(w), JSON.stringify({ model: 'gpt-5', effort: 'max' }))
+    const s = tuned(w, { effort: 'medium' })
+    expect(s.backend.tune!.get()).toEqual({ model: 'claude-sonnet-5-5', effort: 'medium' })
+  })
+
+  test('a backend without the knobs says so', async () => {
+    const s = setup()
+    await s.bridge.handle(msg(OWNER, '!effort high'))
+    expect(s.last().text).toContain('no effort setting')
   })
 })
 

@@ -39,6 +39,26 @@ export type TurnContext = {
   unpause(args: { user_id: string }): Promise<string>
 }
 
+/** The owner-adjustable knobs of a backend (!model, !effort). The next turn reads them; a running session keeps its history. */
+export type Tune = {
+  /** Effort values the SDK accepts and the owner may pick. */
+  efforts: readonly string[]
+  /** What `!model` accepts, for the usage line. */
+  modelHint: string
+  get(): { model: string; effort: string }
+  /** The model id for what the owner typed (an alias or an id); throws UserFacingError when the backend refuses it. */
+  resolveModel(input: string): string
+  set(s: { model?: string; effort?: string }): void
+}
+
+/** VOKKO_AI_EFFORT: one of `allowed`, or `fallback` when unset. Throws a message fit for the log. */
+export function parseEffort(raw: string | undefined, allowed: readonly string[], fallback = 'low'): string {
+  const v = (raw ?? '').trim().toLowerCase()
+  if (!v) return fallback
+  if (!allowed.includes(v)) throw new Error(`VOKKO_AI_EFFORT must be one of ${allowed.join(', ')}, not ${raw}`)
+  return v
+}
+
 export interface Backend {
   /** Key prefix for sessions, e.g. "claude-api". */
   readonly name: string
@@ -46,6 +66,8 @@ export interface Backend {
   readonly metered: boolean
   /** Answers only allowlisted (paired) senders, never other members of an opted-in channel. */
   readonly allowlistedOnly?: boolean
+  /** Model and effort the owner can change at runtime. */
+  readonly tune?: Tune
   ask(sessionId: string | undefined, prompt: string, ctx: TurnContext): Promise<Answer>
 }
 
@@ -122,6 +144,9 @@ export class Bridge {
   readonly pauses: PauseStore
   private readonly sessionsFile: string
   private readonly usageFile: string
+  private readonly settingsFile: string
+  /** The owner's !model / !effort choices that are in force; they override the env defaults. */
+  private settings: { model?: string; effort?: string } = {}
   private readonly sessions: Record<string, Session>
   private usage: Usage
   private readonly hits = new Map<string, number[]>()
@@ -147,6 +172,51 @@ export class Bridge {
     // Older files kept just the id.
     this.sessions = Object.fromEntries(Object.entries(sessions).map(([k, v]) => [k, typeof v === 'string' ? { id: v, at: now(), turns: 0 } : v]))
     this.usage = readJson<Usage>(this.usageFile, NO_USAGE)
+    this.settingsFile = join(dir, `settings-${backend.name}.json`)
+    this.restoreSettings()
+  }
+
+  /** Re-applies the saved choices; one that is no longer valid (a model gone from the catalog) is logged and skipped. */
+  private restoreSettings(): void {
+    const tune = this.backend.tune
+    if (!tune) return
+    const saved = readJson<{ model?: string; effort?: string }>(this.settingsFile, {})
+    if (typeof saved.model === 'string') {
+      try {
+        this.settings.model = tune.resolveModel(saved.model)
+      } catch (e) {
+        this.log(`saved model ${saved.model} ignored: ${e instanceof Error ? e.message : e}`)
+      }
+    }
+    if (typeof saved.effort === 'string') {
+      if (tune.efforts.includes(saved.effort)) this.settings.effort = saved.effort
+      else this.log(`saved effort ${saved.effort} ignored: not one of ${tune.efforts.join(', ')}`)
+    }
+    tune.set(this.settings)
+  }
+
+  /** `!model` / `!effort` with or without a value. */
+  private tuneCommand(kind: 'model' | 'effort', arg: string | undefined): string {
+    const tune = this.backend.tune
+    if (!tune) return `This backend has no ${kind} setting.`
+    const now = tune.get()
+    const options = kind === 'model' ? tune.modelHint : tune.efforts.join('|')
+    if (!arg) return `${this.backend.name} ${kind}: ${now[kind]}. Switch with \`!${kind} ${options}\`.`
+    let value: string
+    if (kind === 'model') {
+      try {
+        value = tune.resolveModel(arg)
+      } catch (e) {
+        return e instanceof Error ? e.message : String(e)
+      }
+    } else {
+      value = arg.toLowerCase()
+      if (!tune.efforts.includes(value)) return `Usage: \`!effort ${options}\``
+    }
+    this.settings = { ...this.settings, [kind]: value }
+    writeJson(this.settingsFile, this.settings)
+    tune.set(this.settings)
+    return `${this.backend.name} ${kind} is now ${value}, from the next turn (running conversations keep their history).`
   }
 
   private log(line: string): void {
@@ -443,6 +513,12 @@ export class Bridge {
         }
         break
       }
+      case '!model':
+        reply = this.tuneCommand('model', args[0])
+        break
+      case '!effort':
+        reply = this.tuneCommand('effort', args[0])
+        break
       case '!pair': {
         const access = this.bot.loadAccess()
         const code = args[0]?.toLowerCase() ?? ''

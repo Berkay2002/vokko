@@ -3,15 +3,15 @@ import { describe, expect, test } from 'bun:test'
 import { mkdtempSync, readFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { claudeApiBackend } from '../claude-api.ts'
-import { LEAN, NOT_SIGNED_IN, cliListers, codexBackend, leanOverrides, type Listers } from '../codex.ts'
-import { BackendError, UserFacingError, childEnv, type TurnContext } from '../core.ts'
+import { CLAUDE_EFFORTS, claudeApiBackend } from '../claude-api.ts'
+import { CODEX_EFFORTS, LEAN, NOT_SIGNED_IN, cliListers, codexBackend, leanOverrides, type Listers } from '../codex.ts'
+import { BackendError, UserFacingError, childEnv, parseEffort, type TurnContext } from '../core.ts'
 
 const ctx: TurnContext = { pause: async () => 'paused', unpause: async () => 'unpaused' }
 const dir = () => mkdtempSync(join(tmpdir(), 'vokko-backend-'))
 
 describe('claude-api backend (Agent SDK stubbed at the module boundary)', () => {
-  function stubbed(results: object[]) {
+  function stubbed(results: object[], extra: { model?: string; effort?: string } = {}) {
     const seen: { prompt: string; options: any }[] = []
     const query = ((p: { prompt: string; options: any }) => {
       seen.push(p)
@@ -33,6 +33,7 @@ describe('claude-api backend (Agent SDK stubbed at the module boundary)', () => 
       webSearch: false,
       maxReplyUsd: 0.5,
       query,
+      ...extra,
     })
     return { backend, seen, d }
   }
@@ -67,6 +68,7 @@ describe('claude-api backend (Agent SDK stubbed at the module boundary)', () => 
     expect(await o.canUseTool('Bash', {}, {})).toMatchObject({ behavior: 'deny' })
     expect(await o.canUseTool('mcp__vokko__pause_user', {}, {})).toMatchObject({ behavior: 'allow' })
     expect(o.model).toBe('claude-sonnet-5-5')
+    expect(o.effort).toBe('low') // chat needs little reasoning: low unless told otherwise
     expect(o.resume).toBeUndefined()
     expect(o.cwd).toBe(join(d, 'work'))
     expect(o.env.ANTHROPIC_API_KEY).toBe('sk-test')
@@ -74,6 +76,25 @@ describe('claude-api backend (Agent SDK stubbed at the module boundary)', () => 
     expect(o.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS).toBe('777')
     expect(o.env.SOME_HOST_SECRET).toBeUndefined()
     expect(o.systemPrompt).toContain('pause_user')
+  })
+
+  test('effort and model: aliases, per turn, and only values the SDK accepts', async () => {
+    const { backend, seen } = stubbed([ok], { model: 'haiku', effort: 'medium' })
+    await backend.ask(undefined, 'x', ctx)
+    expect(seen[0].options).toMatchObject({ model: 'claude-haiku-5-5', effort: 'medium' })
+    backend.tune!.set({ model: backend.tune!.resolveModel('SONNET'), effort: 'high' })
+    await backend.ask('sess-1', 'x', ctx) // a resumed session reads them too
+    expect(seen[1].options).toMatchObject({ model: 'claude-sonnet-5-5', effort: 'high', resume: 'sess-1' })
+    expect(backend.tune!.resolveModel('claude-opus-5-5')).toBe('claude-opus-5-5')
+    expect(() => backend.tune!.resolveModel('gpt-5')).toThrow(UserFacingError)
+    expect(CLAUDE_EFFORTS).toEqual(['low', 'medium', 'high'])
+  })
+
+  test('VOKKO_AI_EFFORT: unset is low, a listed value passes, anything else is refused with the choices', () => {
+    expect(parseEffort(undefined, CLAUDE_EFFORTS)).toBe('low')
+    expect(parseEffort(' High ', CLAUDE_EFFORTS)).toBe('high')
+    expect(() => parseEffort('turbo', CLAUDE_EFFORTS)).toThrow('VOKKO_AI_EFFORT must be one of low, medium, high, not turbo')
+    expect(() => parseEffort('minimal', CODEX_EFFORTS)).toThrow('VOKKO_AI_EFFORT')
   })
 
   test('resumes the stored session; a budget/turn overrun is a short reply and drops the session', async () => {
@@ -96,7 +117,7 @@ describe('claude-api backend (Agent SDK stubbed at the module boundary)', () => 
 })
 
 describe('codex backend (Codex SDK stubbed at the module boundary)', () => {
-  function stubbed(run: (input: string) => Promise<any>, model?: string) {
+  function stubbed(run: (input: string) => Promise<any>, model?: string, effort?: string) {
     const made: any[] = []
     const threads: { kind: string; id?: string; options: any; inputs: string[] }[] = []
     class FakeCodex {
@@ -130,13 +151,28 @@ describe('codex backend (Codex SDK stubbed at the module boundary)', () => {
       features: o => [{ name: 'code_mode_host', enabled: !o.includes('features.code_mode_host=false') }],
       models: () => JSON.stringify({ models: [{ slug: 'm', tool_mode: 'code_mode_only', multi_agent_version: 'v2', apply_patch_tool_type: 'freeform', experimental_supported_tools: ['clock'] }] }),
     }
-    const backend = codexBackend({ workDir: join(dir(), 'work'), botName: 'Codex', Codex: FakeCodex as any, listers, model })
+    const backend = codexBackend({ workDir: join(dir(), 'work'), botName: 'Codex', Codex: FakeCodex as any, listers, model, effort })
     return { backend, made, threads }
   }
 
   test('a model the catalog does not list: refuses to start; no model: the catalog\'s first', () => {
     expect(() => stubbed(async () => ({}), 'gpt-unknown')).toThrow('not in the CLI\'s model catalog')
     expect(stubbed(async () => ({ finalResponse: '', items: [] })).backend).toBeDefined()
+  })
+
+  test('effort defaults to low, the env value wins, model and effort changes reach resumed threads, !model only takes a catalog model', async () => {
+    const run = async () => ({ finalResponse: 'done', items: [] })
+    const d = stubbed(run)
+    await d.backend.ask(undefined, 'a', ctx)
+    expect(d.threads[0].options).toMatchObject({ model: 'm', modelReasoningEffort: 'low' })
+    const e = stubbed(run, undefined, 'high')
+    await e.backend.ask(undefined, 'a', ctx)
+    expect(e.threads[0].options.modelReasoningEffort).toBe('high')
+    e.backend.tune!.set({ effort: 'medium' })
+    await e.backend.ask('thread-1', 'b', ctx)
+    expect(e.threads[1]).toMatchObject({ kind: 'resume', options: { model: 'm', modelReasoningEffort: 'medium' } })
+    expect(e.backend.tune!.resolveModel(' m ')).toBe('m')
+    expect(() => e.backend.tune!.resolveModel('sonnet')).toThrow(/doesn't list "sonnet".*Listed: m/)
   })
 
   test('read-only, no network, approvals never, minimal env, house rules on a new thread only', async () => {
