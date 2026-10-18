@@ -52,9 +52,11 @@ class LiveKitViewer implements Viewer {
           this.cb.video({ attach: el => void track.attach(el), detach: el => void track.detach(el) });
         } else if (track.kind === Track.Kind.Audio && pub.source === Track.Source.ScreenShareAudio && track instanceof RemoteAudioTrack) {
           this.audio = track;
-          track.setVolume(this.volume);
           this.buffer(track.receiver);
           const el = track.attach();
+          // After attach: LiveKit builds the gain node in attach and skips a stored volume of 0 (falsy), so a Mute (or 0 %) set
+          // before the track arrived, or kept across a resubscribe, would play at full level.
+          track.setVolume(this.volume);
           el.hidden = true;
           document.body.append(el);
           this.elements.push(el);
