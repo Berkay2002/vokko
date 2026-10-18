@@ -5,8 +5,9 @@ import { Announcer, ContextMenuHost } from "./ui";
 import { AppShell } from "./shell/AppShell";
 import { LoginPage, OAuthCallbackPage, RegisterPage, ResetPage, VerifyPage } from "./shell/AuthPages";
 import { NotifyBanners, Splash } from "./notify";
-import { invitePath, onDeepLink } from "./desktop";
+import { invitePath, onDeepLink, templatePath } from "./desktop";
 import { InvitePage } from "./shell/InvitePage";
+import { TemplatePage } from "./templates/TemplatePage";
 import { afterSignInPath } from "./shell/pendingInvite";
 import { AuthorizePage } from "./apps/AuthorizePage";
 import { WindowFrame } from "./shell/WindowControls";
@@ -26,7 +27,7 @@ function Guest({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-/** `vokko://invite/<code>` links from the desktop shell open the invite page. Auth links stay queued for the sign-in code. */
+/** `vokko://invite/<code>` and `vokko://template/<code>` links from the desktop shell open the invite or template page. Auth links stay queued for the sign-in code. */
 function DeepLinks() {
   const navigate = useNavigate();
   // Imperative go() for code outside components. Bound here, above every route, so the desktop OAuth callback link also works on /login.
@@ -39,8 +40,9 @@ function DeepLinks() {
       onDeepLink(
         link => {
           if (link.kind === "invite") void navigate(invitePath(link.code));
+          if (link.kind === "template") void navigate(templatePath(link.code));
         },
-        { kinds: ["invite"] },
+        { kinds: ["invite", "template"] },
       ),
     [navigate],
   );
@@ -57,6 +59,7 @@ export function App() {
         <Route path="/reset" element={<ResetPage />} />
         <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
         <Route path="/invite/:code" element={<InvitePage />} />
+        <Route path="/template/:code" element={<TemplatePage />} />
         <Route path="/oauth2/authorize" element={<AuthorizePage />} />
         <Route path="/channels/:guildId" element={<Protected />} />
         <Route path="/channels/:guildId/:channelId" element={<Protected />} />

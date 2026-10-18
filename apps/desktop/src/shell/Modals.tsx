@@ -4,10 +4,12 @@ import { logout } from "../api/auth";
 import { ApiRequestError } from "../api/errors";
 import { request, uploadAttachment } from "../api/rest";
 import { appStore, displayName, useStore } from "../api/store";
-import { ChannelType, OverwriteType, RelationshipType } from "../api/types";
+import { ChannelType, OverwriteType, RelationshipType, type GuildTemplate } from "../api/types";
 import { Modal } from "../ui";
 import { Avatar } from "./Avatar";
-import { addGroupRecipients, createChannel, createGroupDM, createGuild, deleteGuild, joinOrApply, leaveGuild } from "./actions";
+import { addGroupRecipients, createChannel, createGroupDM, createGuild, createGuildFromTemplate, deleteGuild, joinOrApply, leaveGuild } from "./actions";
+import { getTemplate, templateCode } from "../templates/api";
+import { TemplatePreview } from "../templates/TemplatePreview";
 import { InviteModal } from "../invites/InviteModal";
 import { ApplyToJoin } from "../invites/ApplyToJoin";
 import { blockUser } from "./menus";
@@ -158,8 +160,11 @@ const TEMPLATE_ICONS: Record<string, LucideIcon> = {
 };
 
 function CreateServer() {
-  const [step, setStep] = useState<"choose" | "purpose" | "customize" | "join">("choose");
+  const [step, setStep] = useState<"choose" | "purpose" | "customize" | "join" | "template">("choose");
   const [template, setTemplate] = useState<ServerTemplate | undefined>(undefined);
+  /** A server template looked up by code ("Create My Own" > "Use a template"). */
+  const [remote, setRemote] = useState<GuildTemplate | null>(null);
+  const [templateInput, setTemplateInput] = useState("");
   const me = useStore(s => s.me);
   const uploadChannel = useStore(s => s.privateChannels[0] ?? Object.values(s.channels).find(c => c.guild_id)?.id);
   const [name, setName] = useState(me ? `${me.global_name ?? me.username}'s server` : "");
@@ -197,6 +202,8 @@ function CreateServer() {
     }
   };
 
+  const create = () => (remote ? createGuildFromTemplate(remote.code, name.trim(), icon?.id) : createGuild(name.trim(), icon?.id, template));
+
   if (step === "choose")
     return (
       <Modal
@@ -219,6 +226,7 @@ function CreateServer() {
           className="choice-row"
           onClick={() => {
             setTemplate(undefined);
+            setRemote(null);
             setStep("purpose");
           }}
         >
@@ -238,6 +246,7 @@ function CreateServer() {
               className="choice-row"
               onClick={() => {
                 setTemplate(t);
+                setRemote(null);
                 setStep("purpose");
               }}
             >
@@ -284,8 +293,76 @@ function CreateServer() {
         <p className="modal-text center skip">
           Not sure? You can <button type="button" className="link-button" onClick={() => setStep("customize")}>skip this question</button> for now.
         </p>
+        {!template && (
+          <p className="modal-text center skip">
+            Have a server template link? <button type="button" className="link-button" onClick={() => (setError(null), setStep("template"))}>Use a template</button>
+          </p>
+        )}
       </Modal>
     );
+
+  if (step === "template") {
+    const lookUp = () => {
+      setBusy(true);
+      setError(null);
+      getTemplate(templateCode(templateInput)).then(
+        found => {
+          setRemote(found);
+          setBusy(false);
+        },
+        e => {
+          setRemote(null);
+          setError(e instanceof ApiRequestError && e.status === 404 ? "That template link is invalid or was deleted." : errorText(e));
+          setBusy(false);
+        },
+      );
+    };
+    return (
+      <Modal
+        open
+        onClose={closeModal}
+        title="Use a Template"
+        footer={
+          <>
+            <button type="button" className="btn btn-link footer-back" onClick={() => setStep("purpose")}>
+              Back
+            </button>
+            {remote ? (
+              <button type="button" className="btn btn-primary" onClick={() => (setName(remote.serialized_source_guild.name), setStep("customize"))}>
+                Continue
+              </button>
+            ) : (
+              <button type="button" className="btn btn-primary" disabled={busy || !templateCode(templateInput)} onClick={lookUp}>
+                Find Template
+              </button>
+            )}
+          </>
+        }
+      >
+        <p className="modal-text center">Enter a server template link or code to start from someone else's setup.</p>
+        <label className="field-label" htmlFor="template-code">
+          Template link <span className="required">*</span>
+        </label>
+        <input
+          id="template-code"
+          className="input"
+          value={templateInput}
+          placeholder="https://vokko.example.com/template/hgM48av5Q69A"
+          autoFocus
+          onChange={e => (setTemplateInput(e.target.value), setRemote(null))}
+          onKeyDown={e => e.key === "Enter" && templateCode(templateInput) && !busy && lookUp()}
+        />
+        {error && <p className="field-error">{error}</p>}
+        {remote && (
+          <div className="tpl-modal-preview" aria-label="Template preview">
+            <div className="tpl-preview-title">{remote.name}</div>
+            {remote.description && <p className="modal-subtle">{remote.description}</p>}
+            <TemplatePreview source={remote.serialized_source_guild} />
+          </div>
+        )}
+      </Modal>
+    );
+  }
 
   if (step === "customize")
     return (
@@ -295,10 +372,10 @@ function CreateServer() {
         title="Customize Your Server"
         footer={
           <>
-            <button type="button" className="btn btn-link footer-back" onClick={() => setStep("purpose")}>
+            <button type="button" className="btn btn-link footer-back" onClick={() => setStep(remote ? "template" : "purpose")}>
               Back
             </button>
-            <button type="button" className="btn btn-primary" disabled={busy || uploading || name.trim().length < 2} onClick={() => run(() => createGuild(name.trim(), icon?.id, template))}>
+            <button type="button" className="btn btn-primary" disabled={busy || uploading || name.trim().length < 2} onClick={() => run(create)}>
               Create
             </button>
           </>
@@ -316,7 +393,8 @@ function CreateServer() {
         <label className="field-label" htmlFor="server-name">
           Server name <span className="required">*</span>
         </label>
-        <input id="server-name" className="input" value={name} maxLength={100} autoFocus onChange={e => setName(e.target.value)} onKeyDown={e => e.key === "Enter" && name.trim().length >= 2 && run(() => createGuild(name.trim(), icon?.id, template))} />
+        <input id="server-name" className="input" value={name} maxLength={100} autoFocus onChange={e => setName(e.target.value)} onKeyDown={e => e.key === "Enter" && name.trim().length >= 2 && run(create)} />
+        {remote && <p className="modal-subtle">From the template {remote.name}</p>}
         {error && <p className="field-error">{error}</p>}
       </Modal>
     );

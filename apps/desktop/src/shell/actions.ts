@@ -13,6 +13,7 @@ import { openModal } from "./modalStore";
 import { dmPath, go, guildPath } from "./nav";
 import { firstTextChannel } from "./channels";
 import type { ServerTemplate } from "./templates";
+import { guildFromTemplate } from "../templates/api";
 
 function waitFor<T>(read: (s: AppState) => T | undefined, timeoutMs = 2500): Promise<T | undefined> {
   const now = read(appStore.getState());
@@ -48,6 +49,17 @@ export async function createGuild(name: string, iconAttachmentId?: Snowflake, te
   const guild = await request<Guild>("POST", "/guilds", { name, ...(iconAttachmentId ? { icon_attachment_id: iconAttachmentId } : {}) });
   await waitFor(s => s.guilds[guild.id]);
   if (template) await seedTemplate(guild.id, template).catch(() => undefined);
+  return openGuild(guild);
+}
+
+/** A new guild from a server template code (docs/api.md "Server templates"), then into its first text channel. */
+export async function createGuildFromTemplate(code: string, name: string, iconAttachmentId?: Snowflake): Promise<Guild> {
+  const guild = await guildFromTemplate(code, name, iconAttachmentId);
+  await waitFor(s => s.guilds[guild.id]);
+  return openGuild(guild);
+}
+
+function openGuild(guild: Guild): Guild {
   const channels = Object.values(appStore.getState().channels).filter(c => c.guild_id === guild.id);
   const target = firstTextChannel(channels);
   go(target ? guildPath(guild.id, target.id) : guildPath(guild.id));

@@ -15,6 +15,8 @@ const MAX_URL_LEN: usize = 4096;
 pub enum DeepLink {
     /// `vokko://invite/<code>`
     Invite { code: String, url: String },
+    /// `vokko://template/<code>`: a server template link.
+    Template { code: String, url: String },
     /// `vokko://auth/callback?code=…&state=…`: the OAuth redirect back from the system browser. The web side
     /// parses the query itself, so the full URL is passed through untouched.
     Auth { url: String },
@@ -35,10 +37,11 @@ pub fn parse(url: &str) -> Option<DeepLink> {
     let mut parts = path.split('/').filter(|part| !part.is_empty());
     let host = parts.next()?;
     match host.to_ascii_lowercase().as_str() {
-        "invite" => {
+        kind @ ("invite" | "template") => {
             let code = parts.next()?;
             let valid = code.len() <= MAX_CODE_LEN && code.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
-            valid.then(|| DeepLink::Invite { code: code.to_owned(), url: url.to_owned() })
+            let (code, url) = (code.to_owned(), url.to_owned());
+            valid.then(|| if kind == "invite" { DeepLink::Invite { code, url } } else { DeepLink::Template { code, url } })
         }
         "auth" => {
             let is_callback = parts.next().is_some_and(|segment| segment.eq_ignore_ascii_case("callback")) && parts.next().is_none();
@@ -123,6 +126,11 @@ mod tests {
         assert_eq!(parse("VOKKO://Invite/ab-c_9/"), invite("ab-c_9", "VOKKO://Invite/ab-c_9/"));
         assert_eq!(parse("vokko-dev://invite/abc"), invite("abc", "vokko-dev://invite/abc"));
         assert_eq!(parse("vokko://invite/abc?src=web#x"), invite("abc", "vokko://invite/abc?src=web#x"));
+        assert_eq!(
+            parse("vokko://template/hgM48av5Q69A"),
+            Some(DeepLink::Template { code: "hgM48av5Q69A".into(), url: "vokko://template/hgM48av5Q69A".into() })
+        );
+        assert_eq!(parse("vokko://template/a.b"), None);
     }
 
     #[test]

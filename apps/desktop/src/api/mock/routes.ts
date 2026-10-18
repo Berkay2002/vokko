@@ -33,6 +33,7 @@ import "./games";
 import { parsePoll, requirePollPerm } from "./polls";
 import { addPoll, isPoll } from "./pollData";
 import "./invites";
+import "./templates";
 import "./guildSettings";
 import "./stage";
 import { assertAcceptsFriendRequest, assertCanOpenDm, assertDmOpen } from "./settings";
