@@ -5,7 +5,7 @@ vi.mock("../api/gateway", () => ({ gateway: { on: (type: string, fn: (data: unkn
 vi.mock("../api/store", () => ({ appStore: { getState: () => ({ channels: {}, threads: {}, me: { id: "me" } }) } }));
 vi.mock("./api", () => ({ commandIndex: vi.fn(), invokeInteraction: vi.fn() }));
 
-import { ComponentType } from "../api/types";
+import { ComponentType, type User } from "../api/types";
 import { invokeInteraction } from "./api";
 import { clickComponent, invalidateGuildIndexes, useAppsStore } from "./store";
 
@@ -21,7 +21,7 @@ describe("invalidateGuildIndexes", () => {
 });
 
 describe("clickComponent", () => {
-  const message = { id: "m1", channel_id: "c1", application_id: "app" };
+  const message = { id: "m1", channel_id: "c1", application_id: "app", author: { id: "app", bot: true } as User };
   const click = () => useAppsStore.getState().clicks.m1;
   afterEach(() => {
     vi.useRealTimers();
@@ -41,6 +41,14 @@ describe("clickComponent", () => {
     expect(invokeInteraction).toHaveBeenCalledTimes(1);
     handlers.INTERACTION_SUCCESS?.({ id: "i1", nonce: click()?.nonce });
     expect(click()).toBeUndefined();
+  });
+
+  it("clicks a bot's own message through its author, and does nothing on a person's", async () => {
+    vi.mocked(invokeInteraction).mockResolvedValue({ id: "i1", nonce: null });
+    clickComponent({ id: "m1", channel_id: "c1", author: { id: "bot", bot: true } as User }, "go", ComponentType.Button);
+    expect(vi.mocked(invokeInteraction).mock.calls[0]?.[0]).toMatchObject({ application_id: "bot" });
+    clickComponent({ id: "m2", channel_id: "c1", author: { id: "person" } as User }, "go", ComponentType.Button);
+    expect(invokeInteraction).toHaveBeenCalledTimes(1);
   });
 
   it("fails on INTERACTION_FAILURE, on a refused request and after a silent timeout, and a later click goes through", async () => {

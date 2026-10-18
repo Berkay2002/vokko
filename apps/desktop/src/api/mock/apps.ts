@@ -853,7 +853,7 @@ function invokeComponent(ctx: Ctx): { id: string; nonce: string | null } {
   const ephemeral = apps.ephemerals.get(messageId);
   const stored = ephemeral ? undefined : sortedMessages(channel.id).find(m => m.id === messageId);
   const message = ephemeral ? (ephemeral.recipient === viewer.user.id && ephemeral.message.channel_id === channel.id ? ephemeral.message : undefined) : stored ? messageFor(stored, viewer.user.id) : undefined;
-  if (!message || message.application_id !== applicationId) fail(404, 10008, "Unknown Message");
+  if (!message || (message.application_id ?? message.author.id) !== applicationId) fail(404, 10008, "Unknown Message");
   if (!usableCommands(channel, viewer.user.id).apps.some(a => a.id === applicationId)) fail(channel.guild_id ? 403 : 404, channel.guild_id ? 50013 : 10002, channel.guild_id ? MISSING_PERMISSIONS : "Unknown Application");
   const component = (message.components ?? []).flatMap(row => row.components ?? []).find(c => c.custom_id === data.custom_id);
   if (!component || component.type !== data.component_type) invalid("data.custom_id", "Unknown component.");

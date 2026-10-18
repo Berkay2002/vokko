@@ -186,8 +186,9 @@ const CLICK_TIMEOUT_MS = 15_000;
 const FAILURE_SHOWN_MS = 8_000;
 
 /** Clicks a button, or picks an option of a select; the answer arrives as MESSAGE_UPDATE/MESSAGE_CREATE, then INTERACTION_SUCCESS (or INTERACTION_FAILURE). */
-export function clickComponent(message: Pick<Message, "id" | "channel_id" | "application_id">, customId: string, componentType: ComponentType, values?: string[]): void {
-  const applicationId = message.application_id;
+export function clickComponent(message: Pick<Message, "id" | "channel_id" | "application_id" | "author">, customId: string, componentType: ComponentType, values?: string[]): void {
+  // Interaction responses name their application; a bot's own message is authored by it (its user id is the application id).
+  const applicationId = message.application_id ?? (message.author?.bot ? message.author.id : undefined);
   const pending = useAppsStore.getState().clicks[message.id];
   if (!applicationId || pending?.state === "sending" || pending?.state === "waiting") return;
   bindAppsGateway();
