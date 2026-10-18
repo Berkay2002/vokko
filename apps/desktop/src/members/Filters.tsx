@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Check, ChevronRight, Plus, X } from "lucide-react";
-import { Popout, useFocusTrap } from "../ui";
+import { Popout } from "../ui";
 import type { Role, Snowflake } from "../api/types";
 import { TIME_PRESETS, type TimeFilter } from "./query";
 
@@ -8,26 +8,8 @@ import { TIME_PRESETS, type TimeFilter } from "./query";
 export function FilterPopout({ anchor, open, onClose, label, children }: { anchor: HTMLElement | null; open: boolean; onClose(): void; label: string; children: ReactNode }) {
   return (
     <Popout anchor={anchor} open={open} onClose={onClose} side="bottom" align="start" gap={4} role="dialog" label={label} className="mp-popout">
-      <Trapped>{children}</Trapped>
+      <div className="mp-popout-body">{children}</div>
     </Popout>
-  );
-}
-
-function Trapped({ children }: { children: ReactNode }) {
-  const box = useRef<HTMLDivElement>(null);
-  useFocusTrap(true, () => box.current);
-  // The popout is invisible until it has been placed, so focus the first entry a frame later (the trap's own focus may miss).
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => {
-      const root = box.current;
-      if (root && !root.contains(document.activeElement)) root.querySelector<HTMLElement>("button:not(:disabled), input")?.focus();
-    });
-    return () => cancelAnimationFrame(frame);
-  }, []);
-  return (
-    <div ref={box} className="mp-popout-body">
-      {children}
-    </div>
   );
 }
 
