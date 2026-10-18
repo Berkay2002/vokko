@@ -114,7 +114,7 @@ test('acceptance screenshots', async ({ page }) => {
   await composer(page).press('Enter');
   const withImage = message(page, 'here is the picture');
   await expect(withImage.locator('.chat-image img')).toBeVisible();
-  await expect(withImage.locator('.chat-file')).toBeVisible();
+  await expect(withImage.locator('.chat-text-preview')).toContainText('some notes');
   await shot(page, '09-image-attachment');
   await withImage.locator('.chat-image').click();
   await expect(page.locator('.chat-lightbox')).toBeVisible();
