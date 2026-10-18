@@ -114,3 +114,43 @@ test('Up in an empty composer still edits the last message, Alt+Down from a mess
   await page.keyboard.press('Alt+ArrowDown');
   await expect.poll(() => page.url()).not.toBe(from);
 });
+
+test('focus goes back to the message after an edit, a reaction picker or a delete dialog', async ({ page }) => {
+  await openDm(page);
+  await sendConfirmed(page, 'keep focus one');
+  await sendConfirmed(page, 'keep focus two');
+  const row = (text: string) => page.locator('.chat-msg', { hasText: text });
+  await enterList(page);
+  await expect(row('keep focus two')).toBeFocused();
+
+  // Edit: cancelled with Escape, then saved with Enter.
+  await page.keyboard.press('e');
+  await expect(page.getByRole('textbox', { name: 'Edit message' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(row('keep focus two')).toBeFocused();
+  await page.keyboard.press('e');
+  await page.keyboard.type(' edited');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.chat-edit')).toHaveCount(0);
+  await expect(row('keep focus two edited')).toBeFocused();
+
+  // Reaction picker closed with Escape.
+  await page.keyboard.press('+');
+  await expect(page.getByRole('dialog', { name: 'Emoji picker' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(row('keep focus two edited')).toBeFocused();
+
+  // Delete dialog: Cancel keeps the message focused, confirming moves to the neighbour (no next one here: the previous).
+  await page.keyboard.press('Delete');
+  await page.getByRole('dialog', { name: 'Delete Message' }).getByRole('button', { name: 'Cancel' }).click();
+  await expect(row('keep focus two edited')).toBeFocused();
+  await page.keyboard.press('Delete');
+  await page.getByRole('dialog', { name: 'Delete Message' }).getByRole('button', { name: 'Delete' }).click();
+  await expect(row('keep focus two')).toHaveCount(0);
+  await expect(row('keep focus one')).toBeFocused();
+
+  // An edit started from the composer (Up) still ends in the composer.
+  await composer(page).press('ArrowUp');
+  await page.keyboard.press('Escape');
+  await expect(composer(page)).toBeFocused();
+});
