@@ -103,6 +103,7 @@ function explain(e: unknown, on403: string): string {
   const { status, code } = e
   if (code === 10065) return 'You need to be in a voice call first.'
   if (code === 10000) return "Music and movies aren't set up on this server."
+  if (code === 40036) return 'Vokko allows 30 changes and 120 lookups per request message; that limit is reached. Tell the member to send a new message to continue.'
   if (status === 429) return `Vokko is rate limiting that. Try again ${e.retryAfter ? `in ${Math.ceil(e.retryAfter)} s` : 'in a moment'}.`
   if (code === 40034 || code === 40035) return clean(e.serverMessage, 200) || 'Another media activity is already running.'
   if (code === 40033) return 'Nothing is playing in your call right now (or the service is unreachable).'

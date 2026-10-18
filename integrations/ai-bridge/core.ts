@@ -47,7 +47,7 @@ export type TurnContext = {
   remember?(note: string): Promise<string>
 }
 
-/** Media and remember calls together that one reply may make. A call makes up to 3 requests and the server allows 30 acting requests per message, so 10 fits (the per-reply cost cap and maxTurns stop it too). */
+/** Media and remember calls together that one reply may make. A call makes up to 3 requests and the server allows 30 changing acting requests per message, so 10 fits (the per-reply cost cap and maxTurns stop it too). */
 export const MEDIA_CALLS_PER_TURN = 10
 
 export const SCOPES = ['dm', 'server'] as const

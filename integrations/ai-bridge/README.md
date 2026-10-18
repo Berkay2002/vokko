@@ -110,7 +110,7 @@ watching. The tools (shared with the plugin, `../claude-channel/media.ts`) are t
   model): the server uses their voice call, their Control Media right and their own Stremio account. The call is the member's
   voice channel in a server (looked up from them) or the DM call itself; the model never names a channel.
 - Guards are the bridge's: a paused person (including one the model just paused) and the monthly budget stop the tools, one
-  reply makes at most 10 tool calls (a call makes up to 3 requests; the server allows 30 acting requests per message), and the per-reply cost cap and the Agent SDK turn limit still apply.
+  reply makes at most 10 tool calls (a call makes up to 3 requests; the server allows 30 changing, non-GET, acting requests per message), and the per-reply cost cap and the Agent SDK turn limit still apply.
 - Server errors reach the chat as one sentence ("You need to be in a voice call first", "Only people with Control Media can
   do that here", "Link your Stremio account in Vokko first"), never a raw dump. The model is told to confirm before it
   replaces what is playing or stops it.
