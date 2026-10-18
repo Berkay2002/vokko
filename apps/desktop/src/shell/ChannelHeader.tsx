@@ -8,6 +8,7 @@ import { PinnedMessages } from "../chat/PinnedMessages";
 import { ThreadsToolbar } from "../threads/ThreadsToolbar";
 import { Popout, Tooltip, useContextMenu, usePhone } from "../ui";
 import { Avatar } from "./Avatar";
+import { GroupIcon } from "./GroupDm";
 import { isPrivateChannel } from "./channelPrivacy";
 import { NavToggle } from "./NavToggle";
 import { muteItem, notificationItem, UNAVAILABLE } from "./menus";
@@ -126,8 +127,22 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
           </>
         ) : (
           <>
-            {oneToOne ? <Avatar user={first} size={24} status /> : <Users size={24} className="channel-header-icon" />}
-            <h1 className="channel-header-name">{dmName(channel)}</h1>
+            {oneToOne ? (
+              <Avatar user={first} size={24} status />
+            ) : group && channel.icon ? (
+              <GroupIcon channel={channel} size={24} />
+            ) : (
+              <Users size={24} className="channel-header-icon" />
+            )}
+            <h1 className="channel-header-name">
+              {group ? (
+                <button type="button" className="channel-header-name-edit" title="Edit Group" onClick={() => openModal({ type: "editGroup", channelId: channel.id })}>
+                  {dmName(channel)}
+                </button>
+              ) : (
+                dmName(channel)
+              )}
+            </h1>
             <ChevronRight size={16} className="channel-header-chevron" aria-hidden="true" />
           </>
         )}
@@ -172,7 +187,7 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
             <UserPlus size={24} />
           </ToolbarButton>
         )}
-        {guild && !voice && (
+        {((guild && !voice) || group) && (
           <ToolbarButton label={membersOpen ? "Hide Member List" : "Show Member List"} secondary active={membersOpen} onClick={onToggleMembers}>
             <Users size={24} />
           </ToolbarButton>

@@ -15,6 +15,7 @@ import { ChannelHeader } from "./ChannelHeader";
 import { useAgeGated } from "./AgeGate";
 import { DetailsPage } from "./DetailsPage";
 import { DmProfilePanel } from "./DmProfilePanel";
+import { GroupMembers } from "./GroupDm";
 import { DmSidebar } from "./DmSidebar";
 import { FriendsPage } from "./FriendsPage";
 import { GuildSidebar } from "./GuildSidebar";
@@ -301,7 +302,7 @@ export function AppShell() {
           )}
           {channel && (
             <>
-              <ChannelHeader channel={channel} gated={gated} membersOpen={membersVisible && !!guild} onToggleMembers={toggleMembers} profileOpen={profileVisible && !!dmRecipient} onToggleProfile={toggleProfile} onOpenDetails={() => useNavDrawer.getState().setDetails(true)} />
+              <ChannelHeader channel={channel} gated={gated} membersOpen={membersVisible && (!!guild || isGroupDm)} onToggleMembers={toggleMembers} profileOpen={profileVisible && !!dmRecipient} onToggleProfile={toggleProfile} onOpenDetails={() => useNavDrawer.getState().setDetails(true)} />
               <div className={`channel-body${threadOpen && (!threadSplitView || phone) ? " thread-full" : ""}`}>
                 <div className="channel-chat">
                   <AgeGate key={channel.id} channel={channel}>
@@ -329,6 +330,7 @@ export function AppShell() {
                   <>
                     {guild && membersVisible && text && <Members guildId={guild.id} />}
                     {dmRecipient && profileVisible && <DmProfilePanel user={dmRecipient} />}
+                    {isGroupDm && membersVisible && <GroupMembers channel={channel} />}
                   </>
                 )}
               </div>

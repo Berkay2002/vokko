@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { ArrowLeft, Bell, BellOff, ChevronRight, Hash, Lock, Megaphone, MessagesSquare, Search, Settings, UserPlus, Users, Volume2 } from "lucide-react";
+import { ArrowLeft, Bell, BellOff, ChevronRight, Hash, Lock, LogOut, Megaphone, MessagesSquare, Pencil, Search, Settings, UserPlus, Users, Volume2 } from "lucide-react";
 import { Perm } from "../api/permissions";
-import { displayName, dmName, useStore } from "../api/store";
+import { dmName, useStore } from "../api/store";
 import { ChannelType, type Channel } from "../api/types";
 import { PinnedMessages } from "../chat/PinnedMessages";
 import { ThreadsPopout } from "../threads/ThreadsPopout";
@@ -9,6 +9,7 @@ import { hasThreadsType } from "../threads/util";
 import { useBackClose, useContextMenu } from "../ui";
 import { Avatar } from "./Avatar";
 import { DmProfilePanel } from "./DmProfilePanel";
+import { GroupIcon, GroupMembers } from "./GroupDm";
 import { isPrivateChannel } from "./channelPrivacy";
 import { useIsMuted } from "./localState";
 import { MemberList } from "./MemberList";
@@ -90,6 +91,11 @@ export function DetailsPage({ channel, onClose }: { channel: Channel; onClose():
         <button type="button" className="details-icon-button" aria-label="Notification Settings" onClick={bell}>
           {muted ? <BellOff size={24} /> : <Bell size={24} />}
         </button>
+        {group && (
+          <button type="button" className="details-icon-button" aria-label="Edit Group" onClick={() => openModal({ type: "editGroup", channelId: channel.id })}>
+            <Pencil size={24} />
+          </button>
+        )}
         {guild && (
           <button type="button" className="details-icon-button" aria-label="Channel Menu" onClick={more}>
             <Settings size={24} />
@@ -99,6 +105,8 @@ export function DetailsPage({ channel, onClose }: { channel: Channel; onClose():
       <div className="details-identity">
         {oneToOne ? (
           <Avatar user={first} size={48} status />
+        ) : group && channel.icon ? (
+          <GroupIcon channel={channel} size={48} />
         ) : (
           <span className="details-identity-icon">{guild ? <Icon size={28} /> : <Users size={28} />}</span>
         )}
@@ -132,14 +140,13 @@ export function DetailsPage({ channel, onClose }: { channel: Channel; onClose():
         )}
         {tab === "members" && oneToOne && <DmProfilePanel user={first} />}
         {tab === "members" && group && (
-          <ul className="details-people">
-            {(channel.recipients ?? []).map(u => (
-              <li key={u.id}>
-                <Avatar user={u} size={32} status />
-                <span>{displayName(u)}</span>
-              </li>
-            ))}
-          </ul>
+          <>
+            <GroupMembers channel={channel} />
+            <button type="button" className="details-row danger" onClick={() => openModal({ type: "leaveGroup", channelId: channel.id })}>
+              <LogOut size={24} />
+              <span>Leave Group</span>
+            </button>
+          </>
         )}
         {tab === "pins" && <PinnedMessages channelId={channel.id} onNavigate={onClose} />}
         {tab === "threads" && <ThreadsPopout channel={channel} onClose={onClose} />}

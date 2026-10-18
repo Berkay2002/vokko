@@ -21,7 +21,7 @@ import { convertEmoticons } from './emoticons';
 import { messageStore } from './messageStore';
 import { TypingIndicator } from './TypingIndicator';
 import { activeTypers } from './messageState';
-import { isSpoilerName, stripSpoiler } from './util';
+import { composerPlaceholder, isSpoilerName, stripSpoiler } from './util';
 import { CreatePollModal } from '../polls/CreatePollModal';
 import { ComposerInput, type ComposerField } from './composer/ComposerInput';
 import { useShortcut } from '../keyboard';
@@ -169,8 +169,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
   // Stickers this channel can take without extra permission checks: the server's own, or everything in DMs.
   const stickers = useMemo(() => (chat.guildId ? allStickers[chat.guildId] ?? [] : Object.values(allStickers).flat()), [allStickers, chat.guildId]);
   const { text, uploads } = draft;
-  const name = chat.channel?.name ? (chat.channel.type === ChannelType.GuildVoice ? chat.channel.name : `#${chat.channel.name}`) :chat.channel?.recipients?.map(u => chat.nameOf(u)).join(', ') ?? '';
-  const placeholder = chat.isDm ? `Message @${chat.channel?.recipients?.[0] ? chat.nameOf(chat.channel.recipients[0]) : ''}` : `Message ${name}`;
+  const placeholder = composerPlaceholder(chat.channel, u => chat.nameOf(u));
 
   useEffect(() => { area.current?.focus(); }, [channelId, focusToken]);
 

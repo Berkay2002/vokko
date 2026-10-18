@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { ApiRequestError } from '../api/errors';
 import { usePrefs } from '../ui/prefs';
 import { MAX_UPLOAD_BYTES, maxUploadBytes, setMaxUploadBytes } from '../api/limits';
-import { formatFullDate, formatMessageTimestamp, formatTime, uploadErrorMessage } from './util';
+import { ChannelType, type Channel, type User } from '../api/types';
+import { composerPlaceholder, formatFullDate, formatMessageTimestamp, formatTime, uploadErrorMessage } from './util';
 
 describe('upload limit', () => {
   it('is 500 MiB, the Nitro limit and the server default', () => {
@@ -76,5 +77,24 @@ describe('server-driven upload limit', () => {
       setMaxUploadBytes(undefined);
     }
     expect(maxUploadBytes()).toBe(MAX_UPLOAD_BYTES);
+  });
+});
+
+describe('composer placeholder', () => {
+  const user = (id: string, name: string) => ({ id, username: name, global_name: null }) as User;
+  const channel = (type: ChannelType, name: string | null, recipients: User[] = []) => ({ id: '1', type, name, recipients }) as unknown as Channel;
+  const nameOf = (u: User) => u.username;
+  const [alice, bob] = [user('2', 'alice'), user('3', 'bob')];
+
+  it('names the other person in a 1:1 DM', () => {
+    expect(composerPlaceholder(channel(ChannelType.DM, null, [alice]), nameOf)).toBe('Message @alice');
+  });
+  it('uses the group name, or the members joined, in a group DM', () => {
+    expect(composerPlaceholder(channel(ChannelType.GroupDM, 'Crew', [alice, bob]), nameOf)).toBe('Message Crew');
+    expect(composerPlaceholder(channel(ChannelType.GroupDM, null, [alice, bob]), nameOf)).toBe('Message alice, bob');
+  });
+  it('uses #name in guild text channels and the bare name in voice', () => {
+    expect(composerPlaceholder(channel(ChannelType.GuildText, 'general'), nameOf)).toBe('Message #general');
+    expect(composerPlaceholder(channel(ChannelType.GuildVoice, 'Lounge'), nameOf)).toBe('Message Lounge');
   });
 });
