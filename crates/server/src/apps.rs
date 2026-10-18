@@ -8,7 +8,7 @@ use sqlx::{FromRow, Postgres, Transaction};
 use vokko_protocol::api::permissions::{ALL, USE_APPLICATION_COMMANDS};
 use vokko_protocol::api::{
     AllowedMentions, Application, ApplicationCommand, ApplicationCommandOption, ApplicationCommandOptionType, ApplicationCommandRequest,
-    ApplicationCommandType, ChannelType, CommandIndexApplication, Component, ComponentType, Embed, GatewayEvent, InstallParams, Message, MessageDelete,
+    ApplicationCommandType, ChannelType, CommandIndexApplication, Component, ComponentEmoji, ComponentType, Embed, GatewayEvent, InstallParams, Message, MessageDelete,
     Snowflake, User,
 };
 
@@ -109,6 +109,9 @@ pub fn validate_components(components: &[Component]) -> ApiResult<Vec<Component>
         let count = text.chars().count();
         if count < min || count > max { Err(bad(path, &format!("Must be between {min} and {max} in length."))) } else { Ok(()) }
     };
+    let bad_emoji = |emoji: &ComponentEmoji| {
+        emoji.name.as_deref().is_some_and(|name| name.chars().count() > 100) || (emoji.id.is_none() && emoji.name.as_deref().is_none_or(str::is_empty))
+    };
     if components.len() > MAX_ROWS {
         return Err(bad("", "Must be 5 or fewer in length."));
     }
@@ -136,6 +139,9 @@ pub fn validate_components(components: &[Component]) -> ApiResult<Vec<Component>
                         return Err(bad(&path, "A button needs a label or an emoji."));
                     }
                     length(&path, child.label.as_deref().unwrap_or(""), 0, MAX_BUTTON_LABEL)?;
+                    if child.emoji.as_ref().is_some_and(bad_emoji) {
+                        return Err(bad(&path, "Invalid emoji."));
+                    }
                     if style == 5 {
                         let https = child.url.as_deref().is_some_and(|url| url.len() <= 2048 && url.trim().to_ascii_lowercase().starts_with("https://"));
                         if !https || id.is_some() {
@@ -161,6 +167,9 @@ pub fn validate_components(components: &[Component]) -> ApiResult<Vec<Component>
                         length(&path, &option.label, 1, MAX_OPTION_TEXT)?;
                         length(&path, &option.value, 1, MAX_OPTION_TEXT)?;
                         length(&path, option.description.as_deref().unwrap_or(""), 0, MAX_OPTION_TEXT)?;
+                        if option.emoji.as_ref().is_some_and(bad_emoji) {
+                            return Err(bad(&path, "Invalid emoji."));
+                        }
                         if !values.insert(option.value.as_str()) {
                             return Err(bad(&path, "Option values must be unique."));
                         }
@@ -171,6 +180,7 @@ pub fn validate_components(components: &[Component]) -> ApiResult<Vec<Component>
                     }
                     child.style = None;
                     child.label = None;
+                    child.emoji = None;
                     child.min_values = Some(1);
                     child.max_values = Some(1);
                 }
@@ -183,7 +193,21 @@ pub fn validate_components(components: &[Component]) -> ApiResult<Vec<Component>
             }
             cleaned_children.push(child);
         }
-        cleaned.push(Component { components: Some(cleaned_children), ..row.clone() });
+        // The row is rebuilt: nothing but its children is kept from what the bot sent.
+        cleaned.push(Component {
+            kind: ComponentType::ActionRow,
+            custom_id: None,
+            style: None,
+            label: None,
+            emoji: None,
+            url: None,
+            disabled: None,
+            options: None,
+            placeholder: None,
+            min_values: None,
+            max_values: None,
+            components: Some(cleaned_children),
+        });
     }
     Ok(cleaned)
 }

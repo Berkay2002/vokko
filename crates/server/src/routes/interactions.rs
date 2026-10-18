@@ -349,6 +349,8 @@ async fn invoke_component(state: AppState, user_id: i64, body: InvokeInteraction
     }
     let (channel_id, application_id) = (body.channel_id.db(), body.application_id.db());
     let access = channel_access(&state, user_id, channel_id).await?;
+    // Like running a command: a member who may not use applications here may not click their buttons either.
+    access.require(vokko_protocol::api::permissions::USE_APPLICATION_COMMANDS)?;
     // The message is a channel message, or an ephemeral one of this user.
     let message = match apps::ephemeral(&state, message_id).await? {
         Some((message, recipient)) => (recipient == user_id).then_some(message),
