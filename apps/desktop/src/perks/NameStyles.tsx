@@ -1,8 +1,24 @@
 import { useId, type CSSProperties, type ReactNode } from "react";
 import type { DisplayNameStyles } from "../api/types";
 import { intToHex, nameEffectById, nameFontById, nameplateById } from "./catalog";
-import { NAMEPLATE_ART } from "./art/nameplates";
+import { lazyModule } from "../ui/lazyModule";
 import "./name-styles.css";
+
+const nameplateArt = lazyModule(() => import("./art/nameplates"));
+
+/** An illustrated plate: the gradient shows at once, the scene once the art chunk has loaded. */
+function NameplateScene({ id, uid, gradient }: { id: string; uid: string; gradient: string }) {
+  const scene = nameplateArt.use()?.NAMEPLATE_ART[id];
+  return (
+    <span className="nameplate np-art" style={{ ["--np-gradient" as string]: gradient } as CSSProperties} aria-hidden="true" data-nameplate={id}>
+      {scene && (
+        <svg className="np-scene" viewBox="0 0 132 44" preserveAspectRatio="xMaxYMid slice" focusable="false">
+          {scene(`np${uid}`)}
+        </svg>
+      )}
+    </span>
+  );
+}
 
 /**
  * A nameplate: the art behind a user's row in the member list and the DM list. Mount it as the first child of a row that has the
@@ -12,16 +28,7 @@ export function Nameplate({ id }: { id: string | null | undefined }) {
   const def = nameplateById(id);
   const uid = useId().replace(/[^a-zA-Z0-9]/g, "");
   if (!def) return null;
-  const scene = def.art && NAMEPLATE_ART[def.id];
-  if (scene) {
-    return (
-      <span className="nameplate np-art" style={{ ["--np-gradient" as string]: `linear-gradient(90deg, ${def.colors.join(", ")})` } as CSSProperties} aria-hidden="true" data-nameplate={def.id}>
-        <svg className="np-scene" viewBox="0 0 132 44" preserveAspectRatio="xMaxYMid slice" focusable="false">
-          {scene(`np${uid}`)}
-        </svg>
-      </span>
-    );
-  }
+  if (def.art) return <NameplateScene id={def.id} uid={uid} gradient={`linear-gradient(90deg, ${def.colors.join(", ")})`} />;
   const style = { ["--np-gradient" as string]: `linear-gradient(90deg, ${def.colors.join(", ")})` } as CSSProperties;
   return (
     <span className={`nameplate${def.pattern ? ` np-${def.pattern}` : ""}${def.sheen ? " np-sheen" : ""}`} style={style} aria-hidden="true" data-nameplate={def.id} />

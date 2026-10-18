@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useRef, useState, type PointerEvent as Re
 import { Navigate, useNavigate, useParams } from "react-router";
 import { ChatView } from "../chat/ChatView";
 import { MediaHost } from "../media/MediaHost";
-import { StremioViewerHost } from "../stremio";
+import { StremioViewerHost } from "../stremio/ViewerHost";
 import { appStore, useStore } from "../api/store";
 import { ChannelType, type Guild, type Snowflake } from "../api/types";
 import { CommunityHost } from "../community";

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronRight, HeadphoneOff, Lock, MicOff, UserPlus, Video } from "lucide-react";
-import { StremioIcon } from "../stremio";
+import { StremioIcon } from "../stremio/StremioIcon";
 import { botVolumeKey } from "../stremio/viewerStore";
 import type { MediaKind } from "../stremio/viewerConnection";
 import { SpotifyIcon } from "../spotify/SpotifyIcon";

@@ -1,6 +1,8 @@
 import { useId } from "react";
 import { decorationById } from "./catalog";
-import { DECORATION_ART } from "./art/decorations";
+import { lazyModule } from "../ui/lazyModule";
+
+const decorationArt = lazyModule(() => import("./art/decorations"));
 
 const STAR = "0,-1 0.29,-0.4 0.95,-0.31 0.47,0.15 0.59,0.81 0,0.5 -0.59,0.81 -0.47,0.15 -0.95,-0.31 -0.29,-0.4";
 
@@ -8,18 +10,21 @@ const STAR = "0,-1 0.29,-0.4 0.95,-0.31 0.47,0.15 0.59,0.81 0,0.5 -0.59,0.81 -0.
  * An avatar decoration: a ring (and optional ornaments) around the avatar, or an illustration from ./art/decorations.tsx. Mount it inside a `position: relative` box that is
  * exactly the avatar's size; it overflows by 12.5% on every side and ignores the pointer. Decorations are Vokko's own set (src/perks/catalog.ts).
  */
+/** An illustrated decoration; nothing until the art chunk has loaded (it overlays the avatar, so nothing moves when it appears). */
+function DecorationArt({ id, uid }: { id: string; uid: string }) {
+  const draw = decorationArt.use()?.DECORATION_ART[id];
+  return draw ? (
+    <svg className="avatar-deco art" viewBox="0 0 100 100" aria-hidden="true" focusable="false" data-decoration={id}>
+      {draw(`deco${uid}`)}
+    </svg>
+  ) : null;
+}
+
 export function AvatarDecoration({ id }: { id: string | null | undefined }) {
   const def = decorationById(id);
   const uid = useId().replace(/[^a-zA-Z0-9]/g, "");
   if (!def) return null;
-  if (def.art) {
-    const draw = DECORATION_ART[def.id];
-    return draw ? (
-      <svg className="avatar-deco art" viewBox="0 0 100 100" aria-hidden="true" focusable="false" data-decoration={def.id}>
-        {draw(`deco${uid}`)}
-      </svg>
-    ) : null;
-  }
+  if (def.art) return <DecorationArt id={def.id} uid={uid} />;
   const gradient = `deco-g-${uid}`;
   const glow = `deco-f-${uid}`;
   const radius = 40 + def.width / 2 + 1.5;
