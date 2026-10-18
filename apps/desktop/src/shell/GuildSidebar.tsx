@@ -257,7 +257,7 @@ export function GuildSidebar({ guild }: { guild: Guild }) {
                     )}
                   </div>
                 )}
-                <ul className="category-channels" ref={el => drag.markRows(el, visible)}>
+                <ul className="category-channels" aria-label={category?.name ?? undefined} ref={el => drag.markRows(el, visible)}>
                   {visible.map(c =>
                     c.type === ChannelType.GuildVoice ? (
                       <MemoVoiceChannelRow key={c.id} channel={c} guild={guild} />

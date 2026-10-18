@@ -128,4 +128,39 @@ test.describe('phone', () => {
     await page.locator('.chat-msg').first().waitFor();
     await check(page, info, 'phone:dm');
   });
+
+  // The list page (rail + DM list or channel list) stands in for the hidden chat: it carries the main landmark and the one h1.
+  test('list pages: landmarks, headings and labelled lists', async ({ page }, info) => {
+    await page.goto('/channels/@me?as=sam&mockLatency=0');
+    const main = page.getByRole('main');
+    await expect(main).toHaveCount(1);
+    await expect(main).toHaveAccessibleName('Direct Messages');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(['Direct Messages']);
+    await expect(main.getByRole('navigation', { name: 'Servers sidebar' })).toBeVisible();
+    await expect(main.getByRole('navigation', { name: 'Private channels' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 2, name: 'Direct Messages' })).toBeVisible();
+    await expect(page.getByRole('list', { name: 'Direct messages' })).toBeVisible();
+    await check(page, info, 'phone:home-list');
+
+    await page.getByRole('link', { name: /^Sam's server/ }).tap();
+    await page.getByRole('list', { name: 'Channels', exact: true }).waitFor();
+    await expect(main).toHaveAccessibleName("Sam's server");
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(["Sam's server"]);
+    await expect(page.getByRole('list', { name: 'Text Channels' })).toBeVisible();
+    await check(page, info, 'phone:channel-list');
+
+    // Reading and tab order: the server rail, then the list, then the account panel.
+    const inOrder = await page.evaluate(() => {
+      const [rail, list, panel] = ['.server-rail', '.sidebar .channel-list', '.user-panel'].map(sel => document.querySelector(sel));
+      const before = (a: Element | null, b: Element | null) => !!a && !!b && !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+      return before(rail, list) && before(list, panel) && document.querySelectorAll('[tabindex]:not([tabindex="0"]):not([tabindex="-1"])').length === 0;
+    });
+    expect(inOrder).toBe(true);
+
+    // Picking a channel brings the chat back as the main landmark.
+    await page.getByRole('link', { name: 'general', exact: true }).tap();
+    await page.locator('.chat-msg').first().waitFor();
+    await expect(page.getByRole('main')).toHaveAccessibleName('general');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
+  });
 });

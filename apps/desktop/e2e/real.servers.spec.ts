@@ -13,7 +13,7 @@ let guest: Session;
 let code = '';
 
 // text channels are links; voice channels are div buttons, so `a.channel-row` keeps "General" (voice) out of the match
-const row = (page: Page, name: string) => page.getByRole('list', { name: 'Channels' }).locator('a.channel-row', { hasText: name });
+const row = (page: Page, name: string) => page.getByRole('list', { name: 'Channels', exact: true }).locator('a.channel-row', { hasText: name });
 
 test.afterAll(async () => {
   await owner?.ctx.close();

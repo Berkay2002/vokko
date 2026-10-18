@@ -37,13 +37,13 @@ export async function openDmWith(page: Page, name: string): Promise<void> {
 }
 
 export async function openChannel(page: Page, name: string): Promise<void> {
-  await page.getByRole('list', { name: 'Channels' }).getByRole('link', { name: new RegExp(`^${name}`, 'i') }).first().click();
+  await page.getByRole('list', { name: 'Channels', exact: true }).getByRole('link', { name: new RegExp(`^${name}`, 'i') }).first().click();
   await composer(page).waitFor();
 }
 
 export async function openGuild(page: Page, name: string): Promise<void> {
   await page.getByRole('navigation', { name: 'Servers sidebar' }).getByRole('link', { name }).click();
-  await page.getByRole('list', { name: 'Channels' }).waitFor();
+  await page.getByRole('list', { name: 'Channels', exact: true }).waitFor();
 }
 
 /** Register a throwaway user (unique per run) and return its API session. */

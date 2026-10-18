@@ -13,7 +13,7 @@ let general: string;
 let devTalk: string;
 let memes: string;
 
-const row = (page: Page, name: string) => page.getByRole('list', { name: 'Channels' }).locator('.channel-row', { hasText: name });
+const row = (page: Page, name: string) => page.getByRole('list', { name: 'Channels', exact: true }).locator('.channel-row', { hasText: name });
 
 test.afterAll(async () => {
   await sam?.ctx.close();
@@ -110,7 +110,7 @@ test('Shift+Escape marks the whole server read and it persists', async () => {
   await expect(row(sam.page, 'memes')).not.toHaveClass(/unread/, { timeout: 10_000 });
   await sam.page.reload();
   await expect(row(sam.page, 'memes')).toBeVisible();
-  await expect(sam.page.getByRole('list', { name: 'Channels' }).locator('.channel-row.unread')).toHaveCount(0);
+  await expect(sam.page.getByRole('list', { name: 'Channels', exact: true }).locator('.channel-row.unread')).toHaveCount(0);
 });
 
 test('member list shows the guild members', async () => {

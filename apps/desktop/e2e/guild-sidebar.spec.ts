@@ -34,7 +34,7 @@ async function openChannel(page: Page, name: string): Promise<string> {
   return target.split('/').pop()!;
 }
 
-const list = (page: Page) => page.getByRole('list', { name: 'Channels' });
+const list = (page: Page) => page.getByRole('list', { name: 'Channels', exact: true });
 const nameIs = (page: Page, name: string) => page.locator('.channel-name', { hasText: new RegExp(`^${name}$`) });
 const row = (page: Page, name: string) => list(page).locator('a.channel-row', { has: nameIs(page, name) });
 const rowWrap = (page: Page, name: string) => list(page).locator('li.channel-row-wrap', { has: page.locator('a.channel-row', { has: nameIs(page, name) }) });

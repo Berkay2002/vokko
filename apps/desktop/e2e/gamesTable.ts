@@ -26,7 +26,7 @@ async function signIn(browser: Browser, user: string, users: string[], ids: Reco
   await page.addInitScript(ids => { for (const [k, v] of Object.entries(ids)) sessionStorage.setItem(k, v); }, ids);
   await page.goto(`/channels/@me?as=${user}&mockLatency=0`);
   await page.getByRole('link', { name: /^Sam's server/ }).click();
-  await page.getByRole('list', { name: 'Channels' }).waitFor();
+  await page.getByRole('list', { name: 'Channels', exact: true }).waitFor();
   const channel = await page.evaluate(() => (window as unknown as Win).__vokkoMock.channelIdByName('General'));
   if (!channel) throw new Error('no General voice channel');
   // Exactly the players in General on every page; this page's own user joins through the UI.

@@ -57,7 +57,7 @@ test('Settings > Advanced has Report a Problem under Support', async ({ page }) 
 test('voice connection popout: Upload Logs opens the same dialog', async ({ page }) => {
   await page.goto('/channels/@me?as=sam&mockLatency=0');
   await page.getByRole('link', { name: /^Sam's server/ }).click();
-  await page.getByRole('list', { name: 'Channels' }).waitFor();
+  await page.getByRole('list', { name: 'Channels', exact: true }).waitFor();
   await page.locator('.sidebar-scroller').evaluate(el => { el.scrollTop = el.scrollHeight; });
   await page.getByRole('button', { name: 'General voice channel' }).click();
   const card = page.getByRole('region', { name: 'Voice connection' });
