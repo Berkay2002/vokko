@@ -3,6 +3,7 @@ name = "spotify-bot"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 description = "Spotify bot: plays Spotify (librespot) into a LiveKit room (internal HTTP API for vokko-server)"
 
 [lints]

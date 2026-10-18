@@ -3,6 +3,7 @@ name = "vokko-desktop"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 
 # The workspace lints, except unsafe code is "deny" here (not "forbid") so the one WebView2 call in window.rs can opt in.
 [lints.rust]

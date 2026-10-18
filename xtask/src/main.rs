@@ -1,12 +1,18 @@
 //! Workspace tasks and dependency-layer enforcement.
 use serde_json::Value;
+use std::path::Path;
 use std::process::Command;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let action = std::env::args().nth(1).unwrap_or_else(|| "help".into());
     match action.as_str() {
         "layers" => layers()?,
-        "help" | "--help" => println!("cargo xtask layers — reject UI dependencies in shared Rust crates"),
+        "privacy" => privacy()?,
+        "help" | "--help" => {
+            println!(
+                "cargo xtask layers — reject UI dependencies in shared Rust crates\ncargo xtask privacy — fail when tracked files match the private personal-data denylist"
+            )
+        }
         other => return Err(format!("unknown task {other}; use cargo xtask --help").into()),
     }
     Ok(())
@@ -58,4 +64,76 @@ fn layers() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("Layer boundaries hold: protocol/platform → engine → app shells.");
     Ok(())
+}
+
+const DENYLIST_FILE: &str = ".private/denylist.txt";
+const DENYLIST_ENV: &str = "VOKKO_PRIVACY_DENYLIST";
+
+/// PCRE patterns, one per line; blank lines and `#` comment lines are ignored.
+fn parse_patterns(text: &str) -> Vec<String> {
+    text.lines().map(|line| line.trim_end_matches('\r')).filter(|line| !line.trim().is_empty() && !line.starts_with('#')).map(str::to_owned).collect()
+}
+
+/// The local file wins over the environment value; no source or no patterns means the guard is skipped.
+fn load_patterns(file_text: Option<&str>, env_text: Option<&str>) -> Vec<String> {
+    file_text.map(parse_patterns).filter(|patterns| !patterns.is_empty()).or_else(|| env_text.map(parse_patterns)).unwrap_or_default()
+}
+
+/// Reduces `git grep -n` output (`path:line:text`) to `path:line`, so CI logs never echo the matched text.
+fn locations(grep_output: &str) -> Vec<String> {
+    grep_output.lines().map(|line| line.splitn(3, ':').take(2).collect::<Vec<_>>().join(":")).collect()
+}
+
+fn privacy() -> Result<(), Box<dyn std::error::Error>> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().ok_or("xtask has no parent directory")?;
+    let file_text = std::fs::read_to_string(root.join(DENYLIST_FILE)).ok();
+    let env_text = std::env::var(DENYLIST_ENV).ok();
+    let patterns = load_patterns(file_text.as_deref(), env_text.as_deref());
+    if patterns.is_empty() {
+        println!("Privacy guard skipped: no {DENYLIST_FILE} and no {DENYLIST_ENV}.");
+        return Ok(());
+    }
+    let mut command = Command::new("git");
+    command.current_dir(root).args(["grep", "-n", "-I", "-i", "-P"]);
+    for pattern in &patterns {
+        command.args(["-e", pattern]);
+    }
+    command.args(["--", ".", ":(exclude,glob)**/Cargo.lock", ":(exclude,glob)**/package-lock.json"]);
+    let output = command.output()?;
+    match output.status.code() {
+        Some(0) => {
+            let hits = locations(&String::from_utf8_lossy(&output.stdout));
+            eprintln!("{}", hits.join("\n"));
+            Err(format!("{} tracked line(s) match the privacy denylist (file:line listed above)", hits.len()).into())
+        }
+        Some(1) => {
+            println!("Privacy guard passed: {} pattern(s), no matches in tracked files.", patterns.len());
+            Ok(())
+        }
+        _ => Err(format!("git grep failed: {}", String::from_utf8_lossy(&output.stderr).trim()).into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_patterns_and_skips_blanks_comments_and_cr() {
+        assert_eq!(parse_patterns("foo\r\n\n# note\n  \nba+r\n"), ["foo", "ba+r"]);
+    }
+
+    #[test]
+    fn file_wins_over_env_and_empty_sources_skip() {
+        assert_eq!(load_patterns(Some("a"), Some("b")), ["a"]);
+        assert_eq!(load_patterns(None, Some("b\nc")), ["b", "c"]);
+        assert_eq!(load_patterns(Some("# only a comment\n"), Some("b")), ["b"]);
+        assert!(load_patterns(None, None).is_empty());
+        assert!(load_patterns(Some(""), Some("\n")).is_empty());
+    }
+
+    #[test]
+    fn locations_drop_the_matched_text() {
+        assert_eq!(locations("src/a.rs:12:let x = 1: y\nREADME.md:3:text\n"), ["src/a.rs:12", "README.md:3"]);
+    }
 }
