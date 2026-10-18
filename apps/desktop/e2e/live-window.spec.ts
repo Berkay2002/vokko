@@ -78,8 +78,8 @@ test('scrolled up: nothing is dropped under the reader', async ({ page }) => {
   const id = await openGeneral(page);
   await burst(page, id, 0, 60);
   await page.locator('.chat-scroller').hover();
-  await page.mouse.wheel(0, -2500);
-  await page.waitForTimeout(400);
+  // A wheel that lands while the burst's rows are still being measured is pulled back to the bottom: repeat until it stays up.
+  await expect.poll(async () => { await page.mouse.wheel(0, -2500); await page.waitForTimeout(400); return gap(page); }).toBeGreaterThan(500);
   const before = await loaded(page, id);
   await burst(page, id, 60, 300);
   expect(await loaded(page, id)).toBe(before + 300);
