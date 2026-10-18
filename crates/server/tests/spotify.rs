@@ -98,7 +98,11 @@ async fn token_endpoint(State(mock): State<Arc<Mock>>) -> Json<Value> {
     Json(json!({"access_token": "ACCESS-TOKEN-SECRET", "expires_in": 3600}))
 }
 
+/// Track 77 answers slowly, so a test can change who is in the call while a `PUT` fetches it.
 async fn one_track(Path(id): Path<String>) -> Response {
+    if number(&id) == 77 {
+        tokio::time::sleep(Duration::from_millis(600)).await;
+    }
     match number(&id) {
         0 => StatusCode::NOT_FOUND.into_response(),
         n => Json(track_json(n)).into_response(),
@@ -394,7 +398,9 @@ struct World {
     /// The guild's #general.
     text: String,
     guild: String,
+    /// sam: the guild's owner and the house account's (`VOKKO_SPOTIFY_OWNER_ID`).
     owner: String,
+    owner_id: String,
     alice: String,
     alice_id: String,
     carl: String,
@@ -465,7 +471,7 @@ async fn world_with(tune: impl FnOnce(&mut SpotifyConfig), with_stremio: bool) -
     app.state.spotify.set_media_rooms(media.clone());
     app.state.stremio.set_media_rooms(media.clone());
     let address = app.serve().await;
-    let (owner, _) = app.register("sam").await;
+    let (owner, owner_user) = app.register("sam").await;
     let (alice, alice_user) = app.register("alice").await;
     let (carl, carl_user) = app.register("carl").await;
     let (guild, text) = app.guild_with_channel(&owner).await;
@@ -476,7 +482,24 @@ async fn world_with(tune: impl FnOnce(&mut SpotifyConfig), with_stremio: bool) -
         assert_eq!(app.post(&format!("/invites/{code}"), token, json!({})).await.0, StatusCode::OK);
     }
     let id = |user: &Value| user["id"].as_str().expect("id").to_owned();
-    World { app, mock, bot, media, address, voice, text, guild, owner, alice, alice_id: id(&alice_user), carl, carl_id: id(&carl_user), stremio: stremio_base }
+    app.state.spotify.set_owner(Some(id(&owner_user).parse().expect("id")));
+    World {
+        app,
+        mock,
+        bot,
+        media,
+        address,
+        voice,
+        text,
+        guild,
+        owner,
+        owner_id: id(&owner_user),
+        alice,
+        alice_id: id(&alice_user),
+        carl,
+        carl_id: id(&carl_user),
+        stremio: stremio_base,
+    }
 }
 
 async fn voice_channel(app: &TestApp, owner: &str, guild: &str) -> String {
@@ -1604,4 +1627,196 @@ async fn voice_states_say_where_a_member_is() {
     let deny = json!({"type": 1, "allow": "0", "deny": vokko_protocol::api::permissions::VIEW_CHANNEL.to_string()});
     assert_eq!(w.app.put_json(&format!("/channels/{}/permissions/{}", w.voice, w.carl_id), &w.owner, deny).await.0, StatusCode::NO_CONTENT);
     assert_eq!(w.app.get(&path(&w.alice_id), &w.carl).await.0, StatusCode::NOT_FOUND);
+}
+
+// ---- only where the house account's owner is (docs/design/spotify-bot.md section 2.3) ----
+
+fn features(guild: &Value) -> Vec<String> {
+    guild["features"].as_array().expect("features").iter().map(|f| f.as_str().expect("feature").to_owned()).collect()
+}
+
+/// alice's own guild with the owner in it (by the owner's own invite use): (guild, text, voice).
+async fn owners_guild_of_alice(w: &World) -> (String, String, String) {
+    let (guild, text) = w.app.guild_with_channel(&w.alice).await;
+    let voice = voice_channel(&w.app, &w.alice, &guild).await;
+    let (_, invite) = w.app.post(&format!("/channels/{text}/invites"), &w.alice, json!({})).await;
+    assert_eq!(w.app.post(&format!("/invites/{}", invite["code"].as_str().expect("code")), &w.owner, json!({})).await.0, StatusCode::OK);
+    (guild, text, voice)
+}
+
+#[tokio::test]
+async fn spotify_works_only_in_guilds_the_owner_is_a_member_of() {
+    use axum::http::Method;
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    // alice's own guild, without the owner: nothing works there, for her or for a bot acting for her.
+    let (elsewhere, elsewhere_text) = w.app.guild_with_channel(&w.alice).await;
+    let other_voice = voice_channel(&w.app, &w.alice, &elsewhere).await;
+    let path = format!("/channels/{other_voice}/spotify");
+    alice.voice(Some(&other_voice)).await;
+    alice.voice_answer().await;
+    let (bot_id, bot) = w.app.bot_in(&w.alice, &elsewhere, "Claude").await;
+    let asked = w.app.say(&elsewhere_text, &w.alice, &format!("<@{bot_id}> play")).await;
+    for method in [Method::GET, Method::PUT, Method::PATCH, Method::DELETE] {
+        let body = match method {
+            Method::PUT => Some(json!({"uri": track_uri(1)})),
+            Method::PATCH => Some(json!({"skip": true})),
+            _ => None,
+        };
+        let (status, error) = w.app.send(method.clone(), &path, Some(&w.alice), body.clone()).await;
+        assert_eq!((status, error["code"].as_u64()), (StatusCode::FORBIDDEN, Some(50013)), "{method} by the member: {error}");
+        let (status, error) = w.acting(method.clone(), &path, &bot, &asked, body).await;
+        assert_eq!((status, error["code"].as_u64()), (StatusCode::FORBIDDEN, Some(50013)), "{method} by a bot acting for her: {error}");
+    }
+    assert_eq!(w.app.post(&format!("{path}/listener-token"), &w.alice, json!({})).await.0, StatusCode::FORBIDDEN);
+    assert!(w.bot.puts().is_empty(), "the bot was never asked");
+    // A bot that shares no guild with the owner cannot use the catalog.
+    let (status, error) = w.app.get("/spotify/search?q=song", &bot).await;
+    assert_eq!((status, error["code"].as_u64()), (StatusCode::FORBIDDEN, Some(50013)), "{error}");
+    // The flag: on where the owner is, off where not.
+    assert_eq!(features(&w.app.get(&format!("/guilds/{}", w.guild), &w.alice).await.1), ["VOKKO_SPOTIFY"]);
+    assert!(features(&w.app.get(&format!("/guilds/{elsewhere}"), &w.alice).await.1).is_empty());
+
+    // The owner joins: GUILD_UPDATE carries the flag and Spotify plays.
+    let (_, invite) = w.app.post(&format!("/channels/{elsewhere_text}/invites"), &w.alice, json!({})).await;
+    let code = invite["code"].as_str().expect("code");
+    assert_eq!(w.app.post(&format!("/invites/{code}"), &w.owner, json!({})).await.0, StatusCode::OK);
+    let update = alice.wait_for("GUILD_UPDATE").await;
+    assert_eq!((update["id"].as_str(), features(&update)), (Some(elsewhere.as_str()), vec!["VOKKO_SPOTIFY".to_owned()]));
+    let (status, state) = w.app.put_json(&path, &w.alice, json!({"uri": track_uri(1)})).await;
+    assert_eq!(status, StatusCode::OK, "{state}");
+    assert_eq!(w.acting(Method::GET, &path, &bot, &asked, None).await.0, StatusCode::OK);
+    assert_eq!(w.app.get("/spotify/search?q=song", &bot).await.0, StatusCode::OK, "the bot shares a guild with the owner now");
+
+    // The owner leaves: the session stops like a DELETE, and GUILD_UPDATE drops the flag.
+    let deletes = w.bot.deletes();
+    assert_eq!(w.app.delete(&format!("/users/@me/guilds/{elsewhere}"), &w.owner).await.0, StatusCode::NO_CONTENT);
+    assert!(features(&alice.wait_for("GUILD_UPDATE").await).is_empty());
+    assert_eq!(alice.ended().await["channel_id"], other_voice.as_str());
+    until("the bot's DELETE", || w.bot.deletes() > deletes).await;
+    assert_eq!(w.app.get(&path, &w.alice).await.0, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn a_kicked_owner_stops_the_session_in_that_guild() {
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    let (guild, _, voice) = owners_guild_of_alice(&w).await;
+    alice.voice(Some(&voice)).await;
+    alice.voice_answer().await;
+    let path = format!("/channels/{voice}/spotify");
+    assert_eq!(w.app.put_json(&path, &w.alice, json!({"uri": track_uri(1)})).await.0, StatusCode::OK);
+    assert_eq!(w.app.delete(&format!("/guilds/{guild}/members/{}", w.owner_id), &w.alice).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(alice.ended().await["channel_id"], voice.as_str());
+    assert_eq!(w.app.get(&path, &w.alice).await.0, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn a_dm_call_plays_only_while_the_owner_is_in_it() {
+    let w = world().await;
+    let (mut alice, ready) = Client::identify(&w.address, &w.alice).await;
+    assert_eq!(ready["spotify_owner_id"], w.owner_id.as_str(), "the client checks DM recipients against it");
+    let (status, dm) = w.app.post("/users/@me/channels", &w.alice, json!({"recipient_id": w.owner_id})).await;
+    assert_eq!(status, StatusCode::OK, "{dm}");
+    let dm = dm["id"].as_str().expect("id").to_owned();
+    let path = format!("/channels/{dm}/spotify");
+    let mut owner = Client::identify(&w.address, &w.owner).await.0;
+    alice.voice(Some(&dm)).await;
+    alice.voice_answer().await;
+    // A recipient is not enough: the owner has to be in the call.
+    let (status, error) = w.app.put_json(&path, &w.alice, json!({"uri": track_uri(1)})).await;
+    assert_eq!((status, error["code"].as_u64()), (StatusCode::FORBIDDEN, Some(50013)), "{error}");
+    owner.voice(Some(&dm)).await;
+    owner.voice_answer().await;
+    let (status, state) = w.app.put_json(&path, &w.alice, json!({"uri": track_uri(1)})).await;
+    assert_eq!(status, StatusCode::OK, "{state}");
+    // The owner hangs up while alice stays: the session stops.
+    owner.voice(None).await;
+    assert_eq!(alice.ended().await["channel_id"], dm.as_str());
+    until("the bot's DELETE", || w.bot.deletes() >= 1).await;
+    assert_eq!(w.app.get(&path, &w.alice).await.0, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn the_catalog_answers_only_the_owner_and_people_who_share_a_guild_with_them() {
+    let w = world().await;
+    assert_eq!(w.app.get("/spotify/search?q=song", &w.owner).await.0, StatusCode::OK);
+    assert_eq!(w.app.get("/spotify/search?q=song", &w.carl).await.0, StatusCode::OK, "a guild-mate");
+    let (stranger, _) = w.app.register("stranger").await;
+    let calls = w.mock.catalog_calls();
+    for path in [
+        "/spotify/search?q=song",
+        "/spotify/tracks/0000000000000000000001",
+        "/spotify/albums/A000000000000000000001",
+        "/spotify/playlists/P000000000000000000001",
+        "/spotify/artists/R000000000000000000001",
+    ] {
+        let (status, error) = w.app.get(path, &stranger).await;
+        assert_eq!((status, error["code"].as_u64()), (StatusCode::FORBIDDEN, Some(50013)), "{path}: {error}");
+    }
+    assert_eq!(w.mock.catalog_calls(), calls, "a stranger never reaches Spotify");
+}
+
+#[tokio::test]
+async fn without_an_owner_spotify_works_nowhere() {
+    let w = world().await;
+    w.app.state.spotify.set_owner(None);
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    w.join(&mut alice).await;
+    let (status, error) = w.play(&w.alice, &track_uri(1)).await;
+    assert_eq!((status, error["code"].as_u64()), (StatusCode::FORBIDDEN, Some(50013)), "{error}");
+    for token in [&w.owner, &w.alice] {
+        assert_eq!(w.app.get("/spotify/search?q=song", token).await.0, StatusCode::FORBIDDEN);
+    }
+    assert!(features(&w.app.get(&format!("/guilds/{}", w.guild), &w.alice).await.1).is_empty());
+    let (_, ready) = Client::identify(&w.address, &w.alice).await;
+    assert!(ready["spotify_owner_id"].is_null(), "{}", ready["spotify_owner_id"]);
+    assert!(ready["guilds"].as_array().expect("guilds").iter().all(|guild| features(guild).is_empty()));
+}
+
+#[tokio::test]
+async fn the_flag_can_be_sent_back_in_a_guild_patch() {
+    let w = world().await;
+    let (status, guild) = w.app.patch(&format!("/guilds/{}", w.guild), &w.owner, json!({"name": "Renamed", "features": ["VOKKO_SPOTIFY"]})).await;
+    assert_eq!((status, features(&guild)), (StatusCode::OK, vec!["VOKKO_SPOTIFY".to_owned()]), "{guild}");
+    assert_eq!(w.app.patch(&format!("/guilds/{}", w.guild), &w.owner, json!({"features": ["DISCOVERABLE"]})).await.0, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn an_owner_leaving_the_dm_call_while_a_start_fetches_its_tracks_refuses_the_start() {
+    let w = world().await;
+    let (_, dm) = w.app.post("/users/@me/channels", &w.alice, json!({"recipient_id": w.owner_id})).await;
+    let dm = dm["id"].as_str().expect("id").to_owned();
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    let mut owner = Client::identify(&w.address, &w.owner).await.0;
+    for client in [&mut alice, &mut owner] {
+        client.voice(Some(&dm)).await;
+        client.voice_answer().await;
+    }
+    let path = format!("/channels/{dm}/spotify");
+    let (status, play) = tokio::join!(w.app.put_json(&path, &w.alice, json!({"uri": track_uri(77)})), async {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        owner.voice(None).await;
+        let owner_id: i64 = w.owner_id.parse().expect("id");
+        until("the owner left the call", || w.app.state.voice.get(owner_id).is_none()).await;
+    })
+    .0;
+    assert_eq!((status, play["code"].as_u64()), (StatusCode::FORBIDDEN, Some(50013)), "{play}");
+    assert!(w.bot.puts().is_empty(), "the bot never played");
+}
+
+#[tokio::test]
+async fn an_owner_id_that_is_not_a_person_counts_as_unset() {
+    let w = world().await;
+    let (bot_id, _) = w.app.bot_in(&w.owner, &w.guild, "Claude").await;
+    w.app.state.spotify.set_owner(Some(bot_id.parse().expect("id")));
+    vokko_server::spotify::check_owner(&w.app.state).await;
+    assert_eq!(w.app.state.spotify.owner(), None, "a bot any guild admin could add");
+    w.app.state.spotify.set_owner(Some(i64::MAX));
+    vokko_server::spotify::check_owner(&w.app.state).await;
+    assert_eq!(w.app.state.spotify.owner(), None, "no such user");
+    let owner: i64 = w.owner_id.parse().expect("id");
+    w.app.state.spotify.set_owner(Some(owner));
+    vokko_server::spotify::check_owner(&w.app.state).await;
+    assert_eq!(w.app.state.spotify.owner(), Some(owner));
 }

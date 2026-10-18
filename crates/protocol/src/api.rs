@@ -4706,6 +4706,9 @@ pub struct ReadyEvent {
     pub desktop_version: Option<String>,
     /// Largest attachment this server accepts, in bytes (`VOKKO_MAX_UPLOAD_MB`); the client checks files against it before uploading.
     pub max_upload_bytes: u64,
+    /// The Spotify house account's owner (`VOKKO_SPOTIFY_OWNER_ID`): Spotify works in a DM call only while they are in it. Null when unset.
+    #[serde(default)]
+    pub spotify_owner_id: Option<Snowflake>,
 }
 
 /// DESKTOP_VERSION: sent to every connected session when the server sees a new desktop release (same value as READY `desktop_version`).
@@ -5789,7 +5792,7 @@ mod tests {
             "v": 1, "user": user(), "session_id": "abc", "guilds": [with_state], "private_channels": [], "presences": [], "read_states": [], "relationships": [],
             "guild_layout": {"guild_folders": [{"id": "9", "name": "games", "color": 5793266, "guild_ids": ["300"]}], "guild_positions": ["300"]},
             "media": {"voice_enabled": true, "voice_bitrate_ceiling": 128000, "screenshare_qualities": ["720p30", "1080p60"], "video_enabled": false},
-            "max_upload_bytes": 524288000
+            "max_upload_bytes": 524288000, "spotify_owner_id": "100"
         }));
         round_trip::<GuildMemberAdd>(
             json!({"user": user(), "nick": null, "roles": [], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": "2026-10-12T10:00:00.000Z", "avatar": null, "banner": null, "bio": null, "pronouns": null, "theme_colors": null, "guild_id": "300"}),

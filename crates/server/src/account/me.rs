@@ -270,6 +270,7 @@ pub async fn delete_account(
         let remaining = crate::access::guild_member_ids(&state, guild_id).await?;
         state.hub.send(&remaining, &GatewayEvent::GuildMemberRemove(GuildMemberRemove { guild_id: Snowflake::from(guild_id), user: user.clone() }));
         crate::presence::announce_leave(&state, guild_id, user_id).await?;
+        crate::spotify::membership_changed(&state, guild_id, user_id).await;
     }
     for (other,) in others {
         state.hub.send(&[other], &GatewayEvent::RelationshipRemove(IdOnly { id: Snowflake::from(user_id) }));

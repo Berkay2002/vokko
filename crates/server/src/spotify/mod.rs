@@ -6,7 +6,8 @@ pub mod bot;
 pub mod queue;
 pub mod webapi;
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::collections::HashSet;
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::extract::{Path, State};
@@ -18,11 +19,13 @@ use vokko_protocol::api::{SpotifyAlbum, SpotifyAlbumSummary, SpotifyArtist, Spot
 
 use self::bot::Bot;
 use self::webapi::{Catalog, CatalogError};
+use crate::access;
 use crate::acting::Actor;
 use crate::config::SpotifyConfig;
 use crate::error::{ApiErr, ApiResult};
 use crate::extract::ApiQuery;
 use crate::state::AppState;
+use crate::store::{self, ChannelRow};
 use crate::stremio::{http_url, limit, lock};
 use crate::voice::livekit::{HttpRoomService, NoRoomService, RoomService};
 use crate::voice::watch::hidden_char;
@@ -40,6 +43,8 @@ pub struct Spotify {
     /// The media LiveKit's RoomService (rooms are closed and listeners removed through it); a fake in tests.
     media_rooms: Mutex<Arc<dyn RoomService>>,
     seq: AtomicU64,
+    /// `VOKKO_SPOTIFY_OWNER_ID` (0 = unset); tests set it once the owner has registered.
+    owner: AtomicI64,
 }
 
 impl Spotify {
@@ -53,13 +58,27 @@ impl Spotify {
                 }
                 None => Arc::new(NoRoomService),
             };
+        let owner = config.as_ref().and_then(|c| c.owner_id);
+        if config.is_some() && owner.is_none() {
+            tracing::warn!("spotify: VOKKO_SPOTIFY_OWNER_ID is not set, so Spotify plays nowhere and the catalog answers nobody");
+        }
         Self {
             catalog: config.as_ref().map(Catalog::new),
             bot: config.as_ref().map(|c| Bot::new(&c.bot_url, &c.bot_secret, &c.market)),
             session: Mutex::default(),
             media_rooms: Mutex::new(media_rooms),
             seq: AtomicU64::new(1),
+            owner: AtomicI64::new(owner.unwrap_or(0)),
         }
+    }
+
+    pub fn set_owner(&self, owner: Option<i64>) {
+        self.owner.store(owner.unwrap_or(0), Ordering::Relaxed);
+    }
+
+    /// The house account's owner, if Spotify is configured with one.
+    pub fn owner(&self) -> Option<i64> {
+        Some(self.owner.load(Ordering::Relaxed)).filter(|id| *id > 0 && self.bot.is_some())
     }
 
     pub fn set_media_rooms(&self, rooms: Arc<dyn RoomService>) {
@@ -88,6 +107,89 @@ pub(crate) fn active(state: &AppState) -> ApiResult<Active<'_>> {
         (Some(cfg), Some(catalog), Some(bot)) => Ok(Active { cfg, catalog, bot }),
         _ => Err(ApiErr::new(StatusCode::NOT_FOUND, 10000, "Unknown")),
     }
+}
+
+// ---- where the house account may be used (docs/design/spotify-bot.md section 2.3) ----
+
+/// In a guild's `features` where the house account plays: its owner is a member.
+pub const FEATURE: &str = "VOKKO_SPOTIFY";
+
+/// Startup: `VOKKO_SPOTIFY_OWNER_ID` must name an existing person (not a bot or webhook, which any guild admin could add, and
+/// not a deleted account); otherwise it counts as unset (fail closed, also when the lookup fails).
+pub async fn check_owner(state: &AppState) {
+    let Some(owner) = state.spotify.owner() else { return };
+    let person: Result<Option<(i64,)>, _> =
+        sqlx::query_as("SELECT id FROM users WHERE id = $1 AND NOT bot AND deleted_at IS NULL").bind(owner).fetch_optional(&state.db).await;
+    if !matches!(person, Ok(Some(_))) {
+        state.spotify.set_owner(None);
+        tracing::warn!("spotify: VOKKO_SPOTIFY_OWNER_ID is not an existing person's account, so Spotify plays nowhere");
+    }
+}
+
+/// Whether the owner is a member of `guild_id`.
+async fn owner_in_guild(state: &AppState, owner: i64, guild_id: i64) -> ApiResult<bool> {
+    let row: Option<(i64,)> =
+        sqlx::query_as("SELECT user_id FROM guild_members WHERE guild_id = $1 AND user_id = $2").bind(guild_id).bind(owner).fetch_optional(&state.db).await?;
+    Ok(row.is_some())
+}
+
+/// Which of `guild_ids` carry `FEATURE`.
+pub(crate) async fn guilds_with_feature(state: &AppState, guild_ids: &[i64]) -> ApiResult<HashSet<i64>> {
+    let Some(owner) = state.spotify.owner() else { return Ok(HashSet::new()) };
+    let rows: Vec<(i64,)> =
+        sqlx::query_as("SELECT guild_id FROM guild_members WHERE user_id = $1 AND guild_id = ANY($2)").bind(owner).bind(guild_ids).fetch_all(&state.db).await?;
+    Ok(rows.into_iter().map(|(id,)| id).collect())
+}
+
+/// Whether the house account may play in `row`: a guild channel of a guild the owner is a member of, or a DM / group DM call the
+/// owner is in right now (anyone can DM the owner, so being a recipient is not enough).
+pub(crate) async fn usable_in(state: &AppState, row: &ChannelRow) -> ApiResult<bool> {
+    let Some(owner) = state.spotify.owner() else { return Ok(false) };
+    if row.is_dm() {
+        return Ok(crate::voice::state::in_channel(state, owner, row.id));
+    }
+    match row.guild_id {
+        Some(guild_id) => owner_in_guild(state, owner, guild_id).await,
+        None => Ok(false),
+    }
+}
+
+/// 403 50013 unless the house account may play in `channel_id`.
+pub(crate) async fn require_usable(state: &AppState, channel_id: i64) -> ApiResult<()> {
+    let row = store::channel_row(state, channel_id).await?.ok_or_else(ApiErr::missing_permissions)?;
+    if usable_in(state, &row).await? { Ok(()) } else { Err(ApiErr::missing_permissions()) }
+}
+
+/// The catalog shares one quota and one server-wide 429 pause, so it answers only the owner and people who share a guild with
+/// them (a bot: the member it acts for, or itself without `X-Vokko-Acting-For`); else 403 50013.
+async fn browsing(state: &AppState, user_id: i64) -> ApiResult<Active<'_>> {
+    let active = active(state)?;
+    let Some(owner) = state.spotify.owner() else { return Err(ApiErr::missing_permissions()) };
+    if user_id != owner {
+        let shared: Option<(i64,)> = sqlx::query_as(
+            "SELECT a.guild_id FROM guild_members a JOIN guild_members b ON b.guild_id = a.guild_id WHERE a.user_id = $1 AND b.user_id = $2 LIMIT 1",
+        )
+        .bind(user_id)
+        .bind(owner)
+        .fetch_optional(&state.db)
+        .await?;
+        if shared.is_none() {
+            return Err(ApiErr::missing_permissions());
+        }
+    }
+    Ok(active)
+}
+
+/// The owner joined or left `guild_id`: its members get a GUILD_UPDATE (the feature flag changed), and a session that may no
+/// longer play stops.
+pub async fn membership_changed(state: &AppState, guild_id: i64, user_id: i64) {
+    if state.spotify.owner() != Some(user_id) {
+        return;
+    }
+    if let (Ok(Some(guild)), Ok(members)) = (store::guild(state, guild_id).await, access::guild_member_ids(state, guild_id).await) {
+        state.hub.send(&members, &vokko_protocol::api::GatewayEvent::GuildUpdate(guild));
+    }
+    crate::voice::spotify::recheck(state).await;
 }
 
 pub fn routes() -> Router<AppState> {
@@ -235,7 +337,7 @@ fn playlist_summary(playlist: SpotifyPlaylist) -> SpotifyPlaylistSummary {
 }
 
 async fn search(State(state): State<AppState>, Actor { user_id, .. }: Actor, ApiQuery(query): ApiQuery<SearchQuery>) -> ApiResult<Json<SpotifySearchResults>> {
-    let active = active(&state)?;
+    let active = browsing(&state, user_id).await?;
     let q = query.q.trim();
     if !(1..=100).contains(&q.chars().count()) || q.chars().any(hidden_char) {
         return Err(ApiErr::invalid("q", "Must be 1 to 100 characters, without control or invisible characters."));
@@ -271,7 +373,7 @@ async fn search(State(state): State<AppState>, Actor { user_id, .. }: Actor, Api
 }
 
 async fn album(State(state): State<AppState>, Actor { user_id, .. }: Actor, Path(id): Path<String>) -> ApiResult<Json<SpotifyAlbum>> {
-    let active = active(&state)?;
+    let active = browsing(&state, user_id).await?;
     check_id(&id)?;
     browse_limit(&state, user_id)?;
     Ok(Json(active.catalog.album(&id).await.map_err(catalog_error)?))
@@ -289,7 +391,7 @@ async fn playlist(
     Path(id): Path<String>,
     ApiQuery(query): ApiQuery<PageQuery>,
 ) -> ApiResult<Json<SpotifyPlaylist>> {
-    let active = active(&state)?;
+    let active = browsing(&state, user_id).await?;
     check_id(&id)?;
     let offset = query.offset.unwrap_or(0);
     if offset > PLAYLIST_OFFSET_MAX {
@@ -300,14 +402,14 @@ async fn playlist(
 }
 
 async fn artist(State(state): State<AppState>, Actor { user_id, .. }: Actor, Path(id): Path<String>) -> ApiResult<Json<SpotifyArtist>> {
-    let active = active(&state)?;
+    let active = browsing(&state, user_id).await?;
     check_id(&id)?;
     browse_limit(&state, user_id)?;
     Ok(Json(artist_page(&active, &id).await.map_err(catalog_error)?))
 }
 
 async fn track(State(state): State<AppState>, Actor { user_id, .. }: Actor, Path(id): Path<String>) -> ApiResult<Json<SpotifyTrack>> {
-    let active = active(&state)?;
+    let active = browsing(&state, user_id).await?;
     check_id(&id)?;
     browse_limit(&state, user_id)?;
     Ok(Json(active.catalog.track(&id).await.map_err(catalog_error)?))

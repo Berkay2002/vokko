@@ -232,6 +232,7 @@ pub async fn guilds_from_rows(state: &AppState, rows: Vec<GuildRow>) -> ApiResul
     .bind(&ids)
     .fetch_all(&state.db)
     .await?;
+    let spotify = crate::spotify::guilds_with_feature(state, &ids).await?;
     let mut by_guild: HashMap<i64, Vec<Role>> = HashMap::new();
     for role in roles {
         by_guild.entry(role.guild_id).or_default().push(Role {
@@ -274,7 +275,11 @@ pub async fn guilds_from_rows(state: &AppState, rows: Vec<GuildRow>) -> ApiResul
                 rules_channel_id: row.rules_channel_id.map(flake),
                 join_mode: JoinMode::from_u8(row.join_mode as u8).unwrap_or_default(),
                 default_message_notifications: DefaultMessageNotifications::from_u8(row.default_message_notifications as u8).unwrap_or_default(),
-                features: if row.community { vec!["COMMUNITY".to_owned()] } else { Vec::new() },
+                features: [(row.community, "COMMUNITY"), (spotify.contains(&row.id), crate::spotify::FEATURE)]
+                    .into_iter()
+                    .filter(|&(on, _)| on)
+                    .map(|(_, feature)| feature.to_owned())
+                    .collect(),
                 public_updates_channel_id: row.public_updates_channel_id.map(flake),
             }
         })

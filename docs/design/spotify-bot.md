@@ -135,6 +135,11 @@ A `PUT` from another channel returns 409 (another new code) with a message that 
 channel*: "Spotify is already playing in #lounge on Friends (started by Alex)". Otherwise: "Spotify is already playing in another
 call." The bot also refuses a second session (503 "busy") as a backstop.
 
+The house account is the owner's own Premium account (`VOKKO_SPOTIFY_OWNER_ID`), and registration is open, so it plays only where the
+owner is: in guilds they are a member of and in DM / group DM calls they are in (a stranger can DM the owner, so a recipient is not
+enough). Everywhere else every `/channels/{id}/spotify` route is 403 50013, and the catalog (one shared quota and 429 pause) answers only
+the owner and people who share a guild with them. The owner leaving the guild or the call stops the session; unset, Spotify plays nowhere.
+
 ### 2.4 Auth and secrets
 
 - **Playback credentials** reach the home server once: the owner runs `spotify-bot login` on the home server. It uses `librespot-oauth`

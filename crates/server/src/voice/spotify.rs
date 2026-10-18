@@ -18,7 +18,7 @@ use vokko_protocol::api::{
 };
 
 use super::token::{self, Claims, VideoGrant};
-use super::watch::{CONTROL_BURST, CONTROL_PER_SECOND, require_in_voice};
+use super::watch::{CONTROL_BURST, CONTROL_PER_SECOND};
 use super::{control, unix_millis, unix_now};
 use crate::access;
 use crate::acting::Actor;
@@ -27,7 +27,7 @@ use crate::error::{ApiErr, ApiResult};
 use crate::extract::ApiJson;
 use crate::spotify::bot::{BotError, Desired, secrets_match};
 use crate::spotify::queue::{Back, Leave, Queue};
-use crate::spotify::{Active, Kind, active, catalog_error, parse_uri};
+use crate::spotify::{Active, Kind, active, catalog_error, parse_uri, require_usable};
 use crate::state::AppState;
 use crate::store;
 use crate::stremio::{limit, lock};
@@ -318,6 +318,14 @@ async fn busy_elsewhere(state: &AppState, user_id: i64, other: i64, started_by: 
     }
 }
 
+/// The check every `/channels/{id}/spotify` route passes: the caller (or the member a bot acts for) is in the channel's call
+/// (`control::in_voice`), and the house account may play there (`spotify::usable_in`); else 403 50013.
+async fn in_call(state: &AppState, user_id: i64, raw: &str) -> ApiResult<control::InVoice> {
+    let ctx = control::in_voice(state, user_id, raw).await?;
+    require_usable(state, ctx.channel_id).await?;
+    Ok(ctx)
+}
+
 // ---- reading ----
 
 /// The channel's session, for a late joiner and `Call`.
@@ -344,7 +352,7 @@ async fn announce(state: &AppState, channel_id: i64, session: Option<SpotifyStat
 
 async fn read(State(state): State<AppState>, Actor { user_id, .. }: Actor, Path(id): Path<String>) -> ApiResult<Json<SpotifyState>> {
     active(&state)?;
-    let channel_id = require_in_voice(&state, user_id, &id).await?;
+    let channel_id = in_call(&state, user_id, &id).await?.channel_id;
     let view = lock(&state.spotify.session).as_ref().filter(|session| session.channel_id == channel_id).map(|session| session.view(true));
     view.map(Json).ok_or_else(nothing_playing)
 }
@@ -382,7 +390,7 @@ fn uri_of(field: &str, text: &str) -> ApiResult<(Kind, String)> {
 async fn start(State(state): State<AppState>, actor: Actor, Path(id): Path<String>, ApiJson(body): ApiJson<SpotifyStartRequest>) -> ApiResult<Response> {
     let user_id = actor.user_id;
     let active = active(&state)?;
-    let ctx = control::in_voice(&state, user_id, &id).await?;
+    let ctx = in_call(&state, user_id, &id).await?;
     let channel_id = ctx.channel_id;
     let (kind, item) = uri_of("uri", &body.uri)?;
     if kind == Kind::Artist {
@@ -416,6 +424,10 @@ async fn start(State(state): State<AppState>, actor: Actor, Path(id): Path<Strin
         let mut slot = lock(&state.spotify.session);
         if slot.as_ref().is_some_and(|session| session.channel_id != channel_id) {
             return Err(ApiErr::new(StatusCode::CONFLICT, 40035, "Spotify is already playing in another call."));
+        }
+        // The owner may have left the DM call while the tracks were fetched (a guild leave is caught by the next sweep).
+        if ctx.is_dm && !state.spotify.owner().is_some_and(|owner| super::state::in_channel(&state, owner, channel_id)) {
+            return Err(ApiErr::missing_permissions());
         }
         let fresh = slot.is_none();
         if let Some(session) = slot.as_ref().filter(|session| session.queue.current.is_some()) {
@@ -584,7 +596,7 @@ fn one_op(body: SpotifyPatchRequest) -> ApiResult<Op> {
 async fn control(State(state): State<AppState>, actor: Actor, Path(id): Path<String>, ApiJson(body): ApiJson<SpotifyPatchRequest>) -> ApiResult<Response> {
     let user_id = actor.user_id;
     let active = active(&state)?;
-    let ctx = control::in_voice(&state, user_id, &id).await?;
+    let ctx = in_call(&state, user_id, &id).await?;
     let channel_id = ctx.channel_id;
     let op = one_op(body)?;
     limit(&state, "watch-together", user_id, CONTROL_BURST, CONTROL_PER_SECOND)?;
@@ -716,7 +728,7 @@ async fn settle(state: &AppState, active: &Active<'_>, channel_id: i64, change: 
 
 async fn stop(State(state): State<AppState>, Actor { user_id, .. }: Actor, Path(id): Path<String>) -> ApiResult<Response> {
     active(&state)?;
-    let ctx = control::in_voice(&state, user_id, &id).await?;
+    let ctx = in_call(&state, user_id, &id).await?;
     let channel_id = ctx.channel_id;
     limit(&state, "watch-together", user_id, CONTROL_BURST, CONTROL_PER_SECOND)?;
     // The check and the removal share the lock: a session started meanwhile is not ended by someone who does not control it.
@@ -737,7 +749,7 @@ async fn stop(State(state): State<AppState>, Actor { user_id, .. }: Actor, Path(
 /// A subscribe-only token for the media room, for someone who is in the call (the same check as the controls) while a session runs.
 async fn listener_token(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>) -> ApiResult<Json<SpotifyListenerToken>> {
     let active = active(&state)?;
-    let channel_id = require_in_voice(&state, user_id, &id).await?;
+    let channel_id = in_call(&state, user_id, &id).await?.channel_id;
     limit(&state, "watch-together", user_id, CONTROL_BURST, CONTROL_PER_SECOND)?;
     let room = lock(&state.spotify.session).as_ref().filter(|session| session.channel_id == channel_id).map(|session| session.room.clone());
     let room = room.ok_or_else(nothing_playing)?;
@@ -811,11 +823,25 @@ pub(crate) async fn refresh(state: &AppState, channel_id: i64) {
     settle(state, &active, channel_id, change).await;
 }
 
-/// A person left the call (or was removed from it): their listener connections go.
+/// A person left the call (or was removed from it): their listener connections go, and if it was the owner leaving a DM call the
+/// session stops.
 pub(crate) fn user_left(state: &AppState, channel_id: i64) {
     if playing_in(state, channel_id) {
         let state = state.clone();
-        tokio::spawn(async move { remove_strangers(&state).await });
+        tokio::spawn(async move {
+            recheck(&state).await;
+            remove_strangers(&state).await;
+        });
+    }
+}
+
+/// Ends the session, the way `DELETE` does, if the house account may no longer play where it is (the owner left the guild or the
+/// DM call). A failed lookup leaves it to the next sweep.
+pub(crate) async fn recheck(state: &AppState) {
+    let Some(channel_id) = lock(&state.spotify.session).as_ref().map(|session| session.channel_id) else { return };
+    let Ok(Some(row)) = store::channel_row(state, channel_id).await else { return };
+    if matches!(crate::spotify::usable_in(state, &row).await, Ok(false)) {
+        end(state, channel_id).await;
     }
 }
 
@@ -943,6 +969,8 @@ pub fn spawn_tasks(state: AppState) {
 
 async fn sweep(state: &AppState) {
     let (Some(cfg), Some(bot)) = (&state.config.spotify, &state.spotify.bot) else { return };
+    // Backstop for a way out of the owner's guild or call that announces nothing.
+    recheck(state).await;
     let now = unix_millis();
     let mut stop = None;
     let mut resend = None;
