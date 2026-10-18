@@ -37,6 +37,8 @@ export interface AppState {
   token: string | null;
   /** True once READY has been applied for the current session. */
   ready: boolean;
+  /** The startup cache (cache/startupCache.ts) is on screen and READY has not arrived: show it, but nothing can be sent. */
+  stale: boolean;
   connection: GatewayStatus;
   me: User | null;
   guilds: Record<Snowflake, Guild>;
@@ -95,6 +97,7 @@ function sortPrivate(channels: Record<Snowflake, Channel>, ids: Iterable<Snowfla
 const initial = {
   token: null,
   ready: false,
+  stale: false,
   connection: "disconnected" as GatewayStatus,
   me: null,
   guilds: {},
@@ -182,6 +185,7 @@ export const appStore = create<AppState>()((set, get) => ({
     for (const [id, thread] of Object.entries(get().threads)) if (thread.thread_metadata?.archived && thread.guild_id && guilds[thread.guild_id] && !threads[id]) threads[id] = thread;
     set({
       ready: true,
+      stale: false,
       me: ready.user,
       guilds,
       guildOrder,

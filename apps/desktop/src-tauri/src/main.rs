@@ -2,6 +2,7 @@
 
 mod appicon;
 mod appinfo;
+mod crash;
 mod games;
 mod links;
 #[cfg(target_os = "macos")]
@@ -163,6 +164,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         eprintln!("Vokko: {error}");
     }
+    crash::install(config_dir.clone());
     log::info!("starting Vokko local scaffold");
 
     let context = tauri::generate_context!();
@@ -229,6 +231,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             desktop_autostart_status,
             desktop_autostart_set,
             desktop_set_unread,
+            crash::desktop_take_crash,
             window::desktop_window_chrome,
             games::desktop_list_processes,
             appinfo::desktop_app_info,

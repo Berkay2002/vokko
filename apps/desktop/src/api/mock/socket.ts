@@ -177,10 +177,17 @@ export class MockSocket {
     const session: Session = { id: `mock-session-${(sessionCounter += 1)}`, userId, seq: 0, buffer: [], socket: this };
     sessions.set(session.id, session);
     this.session = session;
-    session.seq += 1;
-    this.out({ op: GatewayOp.Dispatch, d: readyFor(userId, session.id), s: session.seq, t: "READY" });
-    sendActiveCalls(session.id, userId);
-    this.sync(userId);
+    const send = () => {
+      if (this.readyState !== 1) return;
+      session.seq += 1;
+      this.out({ op: GatewayOp.Dispatch, d: readyFor(userId, session.id), s: session.seq, t: "READY" });
+      sendActiveCalls(session.id, userId);
+      this.sync(userId);
+    };
+    // Perf runs: localStorage `vokko.mock.readyDelay` (ms) holds READY back like a slow network or a busy server.
+    const delay = Number(localStorage.getItem("vokko.mock.readyDelay") ?? 0);
+    if (delay > 0) setTimeout(send, delay);
+    else send();
   }
 
   private resume(d: { token?: string; session_id?: string; seq?: number }): void {

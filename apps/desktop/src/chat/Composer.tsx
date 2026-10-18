@@ -3,7 +3,7 @@ import { AtSign, ChartBarBig, CircleAlert, Eye, FileUp, Hash, LayoutGrid, Lock, 
 import { Perm, channelPermissions, hasBit, memberLike } from '../api/permissions';
 import { ChannelType } from '../api/types';
 import type { Gif, Message, Snowflake, Sticker as StickerData } from '../api/types';
-import { request, BottomSheet, Popout, Tooltip, usePhone, resolveUrl, useComposerOptions, useConvertEmoticons, useGuild, useGuildMembers, useLegacyChatInput } from './shell';
+import { request, useStale, BottomSheet, Popout, Tooltip, usePhone, resolveUrl, useComposerOptions, useConvertEmoticons, useGuild, useGuildMembers, useLegacyChatInput } from './shell';
 import { useMedia } from '../media/store';
 import { useChat } from './ChatContext';
 import { Avatar } from './Avatar';
@@ -94,6 +94,7 @@ export interface ComposerProps {
 
 export function Composer({ channelId, replyTo, mentionReply, onToggleMention, onCancelReply, onSent, onEditLast, focusToken }: ComposerProps) {
   const chat = useChat();
+  const stale = useStale();
   const draft = useDraft(channelId);
   const area = useRef<ComposerField>(null);
   const plusBtn = useRef<HTMLButtonElement>(null);
@@ -359,6 +360,12 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
   const remaining = MAX_LEN - rawContent.length;
   const replyName = replyTo ? chat.nameOf(replyTo.author, replyTo.member) : '';
   const hasText = text.length > 0;
+
+  if (stale) return <div className="chat-composer" ref={root}>
+    <div className="chat-composer-box chat-composer-locked" role="status">
+      <span>Connecting… You can send messages once Vokko is back online.</span>
+    </div>
+  </div>;
 
   if (!chat.canSend) return <div className="chat-composer" ref={root}>
     <TypingIndicator channelId={channelId} />

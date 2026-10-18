@@ -2467,6 +2467,17 @@ export interface BugReportCreated {
   id: Snowflake;
 }
 
+// ---- Crash reports (docs/api.md "Crash reports"): automatic, opt-out, no user id or message text stored ----
+export type CrashKind = "error" | "unhandled_rejection" | "panic";
+export interface CreateCrashReportRequest {
+  kind: CrashKind;
+  app_version: string; // at most 64
+  os: string; // at most 256
+  route: string; // ids replaced with ":id", at most 256
+  message: string; // 1-1000
+  stack: string; // scrubbed, at most 16,000; the whole body is capped at 32 KiB
+}
+
 // ---- Reports (MOD-009) ----
 export type ReportReason = "spam" | "harassment" | "hate" | "sexual" | "violence" | "self_harm" | "impersonation" | "other";
 export type ReportStatus = "open" | "resolved" | "dismissed";

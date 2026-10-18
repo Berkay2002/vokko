@@ -400,19 +400,28 @@ export const messageStore = {
   },
 
   getState(channelId: Snowflake): ChannelState { return states.get(channelId) ?? EMPTY; },
+
+  subscribe(channelId: Snowflake, cb: Listener): () => void {
+    let set = listeners.get(channelId);
+    if (!set) { set = new Set(); listeners.set(channelId, set); }
+    const target = set;
+    target.add(cb);
+    return () => { target.delete(cb); };
+  },
+
+  /** Startup cache (cache/startupCache.ts): a channel's saved newest page, shown before READY; READY refetches it like any loaded channel. */
+  seed(channelId: Snowflake, page: Message[]): void {
+    bindGateway();
+    if (states.has(channelId)) return;
+    const messages = page.map(normalizeMessage);
+    rememberMessages(messages);
+    states.set(channelId, replaceWindow(emptyState(), messages, { hasMoreBefore: messages.length >= PAGE_SIZE, hasMoreAfter: false }));
+    touched.set(channelId, Date.now());
+  },
 };
 
 export function useChannelState(channelId: Snowflake): ChannelState {
-  return useSyncExternalStore(
-    cb => {
-      let set = listeners.get(channelId);
-      if (!set) { set = new Set(); listeners.set(channelId, set); }
-      const target = set;
-      target.add(cb);
-      return () => { target.delete(cb); };
-    },
-    () => states.get(channelId) ?? EMPTY,
-  );
+  return useSyncExternalStore(cb => messageStore.subscribe(channelId, cb), () => states.get(channelId) ?? EMPTY);
 }
 
 export type { ChannelState, PendingMessage };
