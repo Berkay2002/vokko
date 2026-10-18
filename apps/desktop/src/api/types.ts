@@ -908,6 +908,7 @@ export interface GameMessage {
 export interface MediaControl {
   host_id: Snowflake; // starts as started_by; moves to whoever has been in the call longest when the host leaves
   added_by?: Snowflake; // who put the current item in play; may skip it without a vote (Spotify omits it while idle)
+  via_bot_id?: Snowflake; // the bot that put it in play for added_by (X-Vokko-Acting-For), for "via Claude"
   skip_votes: Snowflake[]; // votes to skip the current item, in vote order
   skip_needed: number; // max(1, ceil(listeners / 2))
   item_seq: number; // changes with every item change and when a skip passes; Stremio and Spotify skips name it
@@ -999,6 +1000,7 @@ export interface StremioItem {
 }
 export interface StremioQueued extends StremioItem {
   added_by: Snowflake;
+  via_bot_id?: Snowflake; // the bot that queued it for added_by
 }
 export interface StremioState extends MediaControl {
   item: StremioItem;
@@ -1160,6 +1162,7 @@ export type SpotifyLoop = "off" | "track" | "queue";
 export interface SpotifyQueueEntry extends SpotifyTrack {
   qid: string;
   added_by: Snowflake;
+  via_bot_id?: Snowflake; // the bot that queued it for added_by
 }
 export interface SpotifyState extends MediaControl {
   status: SpotifyStatus;

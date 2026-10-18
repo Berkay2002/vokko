@@ -22,7 +22,7 @@ use vokko_protocol::api::{StremioContinueItem, StremioMeta};
 use super::addons::{allowed_image, valid_kind, valid_title_id, valid_video_id};
 use super::client::AccountError;
 use super::rank::clean_text;
-use crate::auth::AuthUser;
+use crate::acting::Actor;
 use crate::error::ApiResult;
 use crate::state::AppState;
 use crate::store::iso;
@@ -42,7 +42,7 @@ const MIN_SAVE_MS: u64 = 10_000;
 // ---- the row ----
 
 /// `GET /stremio/continue`: the caller's own Continue watching. Unlinked (or a dead key) is an empty row.
-pub async fn continue_watching(State(state): State<AppState>, AuthUser(user_id): AuthUser) -> ApiResult<Json<Vec<StremioContinueItem>>> {
+pub async fn continue_watching(State(state): State<AppState>, Actor { user_id, .. }: Actor) -> ApiResult<Json<Vec<StremioContinueItem>>> {
     let active = active(&state)?;
     limit(&state, "stremio-continue", user_id, 5.0, 0.2)?;
     let Some((key, _)) = load_key(&state, &active, user_id).await? else { return Ok(Json(Vec::new())) };

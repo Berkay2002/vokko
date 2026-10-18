@@ -5,6 +5,7 @@ use vokko_protocol::api::permissions::CONTROL_MEDIA;
 use vokko_protocol::api::{ChannelType, MediaControl, Snowflake, skip_needed};
 
 use super::state::VoiceEntry;
+use crate::acting::Actor;
 use crate::error::{ApiErr, ApiResult};
 use crate::extract::parse_id;
 use crate::state::AppState;
@@ -70,10 +71,11 @@ impl Room {
 }
 
 /// A new session: the caller hosts it and added its first item.
-pub(crate) fn new_session(user_id: i64, room: &Room) -> MediaControl {
+pub(crate) fn new_session(actor: Actor, room: &Room) -> MediaControl {
     MediaControl {
-        host_id: Snowflake::from(user_id),
-        added_by: Some(Snowflake::from(user_id)),
+        host_id: Snowflake::from(actor.user_id),
+        added_by: Some(Snowflake::from(actor.user_id)),
+        via_bot_id: actor.via_bot.map(Snowflake::from),
         skip_votes: Vec::new(),
         skip_needed: skip_needed(room.listeners().count()),
         item_seq: 0,
@@ -81,9 +83,10 @@ pub(crate) fn new_session(user_id: i64, room: &Room) -> MediaControl {
 }
 
 /// The current item changed: its votes go and `added_by` names whoever put it in play.
-pub(crate) fn new_item(control: &mut MediaControl, added_by: Option<i64>) {
+pub(crate) fn new_item(control: &mut MediaControl, added_by: Option<Actor>) {
     control.skip_votes.clear();
-    control.added_by = added_by.map(Snowflake::from);
+    control.added_by = added_by.map(|actor| Snowflake::from(actor.user_id));
+    control.via_bot_id = added_by.and_then(|actor| actor.via_bot).map(Snowflake::from);
     control.item_seq = control.item_seq.wrapping_add(1);
 }
 
@@ -198,7 +201,7 @@ mod tests {
     fn deafened_people_neither_count_nor_vote() {
         // host 7 and listener 8 can hear it; 9 is self-deafened and 10 server-deafened
         let room = Room { inside: vec![entry(7, false, false), entry(8, false, false), entry(9, true, false), entry(10, false, true)] };
-        let mut control = new_session(7, &room);
+        let mut control = new_session(Actor::from(7), &room);
         assert_eq!(control.skip_needed, 1, "two listeners");
         assert!(!skip_request(&mut control, &ctx(9, 0), true, None, &room), "a deafened vote does not count");
         assert!(control.skip_votes.is_empty(), "and is dropped");
@@ -206,7 +209,7 @@ mod tests {
         assert!(skip_request(&mut control, &ctx(8, 0), true, None, &room), "one of two listeners skips");
         // undeafened, 9 and 10 count again: 4 listeners need 2 votes
         let room = Room { inside: vec![entry(7, false, false), entry(8, false, false), entry(9, false, false), entry(10, false, false)] };
-        let mut control = new_session(7, &room);
+        let mut control = new_session(Actor::from(7), &room);
         assert_eq!(control.skip_needed, 2);
         assert!(!skip_request(&mut control, &ctx(8, 0), true, None, &room));
         assert!(skip_request(&mut control, &ctx(9, 0), true, None, &room));

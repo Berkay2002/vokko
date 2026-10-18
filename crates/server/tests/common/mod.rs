@@ -89,7 +89,15 @@ impl TestApp {
     }
 
     pub async fn send(&self, method: Method, path: &str, token: Option<&str>, body: Option<Value>) -> (StatusCode, Value) {
+        self.send_with(method, path, token, &[], body).await
+    }
+
+    /// `send` with extra request headers.
+    pub async fn send_with(&self, method: Method, path: &str, token: Option<&str>, headers: &[(&str, &str)], body: Option<Value>) -> (StatusCode, Value) {
         let mut builder = Request::builder().method(method).uri(format!("/api/v1{path}"));
+        for (name, value) in headers {
+            builder = builder.header(*name, *value);
+        }
         if let Some(token) = token {
             builder = builder.header("authorization", token);
         }
@@ -146,6 +154,23 @@ impl TestApp {
         let channel =
             channels.as_array().expect("channels").iter().find(|c| c["name"] == "general").expect("general channel")["id"].as_str().expect("id").to_owned();
         (guild_id, channel)
+    }
+
+    /// A bot application of `owner`'s, added to `guild`; returns (bot user id, "Bot <token>").
+    pub async fn bot_in(&self, owner: &str, guild: &str, name: &str) -> (String, String) {
+        let (status, created) = self.post("/applications", owner, json!({"name": name})).await;
+        assert_eq!(status, StatusCode::OK, "{created}");
+        let id = created["id"].as_str().expect("id").to_owned();
+        let (status, added) = self.post(&format!("/oauth2/authorize?client_id={id}"), owner, json!({"guild_id": guild, "permissions": "2048"})).await;
+        assert_eq!(status, StatusCode::OK, "{added}");
+        (id, format!("Bot {}", created["token"].as_str().expect("token")))
+    }
+
+    /// `token` posts `content` in `channel`; returns the message id.
+    pub async fn say(&self, channel: &str, token: &str, content: &str) -> String {
+        let (status, message) = self.post(&format!("/channels/{channel}/messages"), token, json!({"content": content})).await;
+        assert_eq!(status, StatusCode::OK, "{message}");
+        message["id"].as_str().expect("id").to_owned()
     }
 
     pub async fn delete(&self, path: &str, token: &str) -> (StatusCode, Value) {

@@ -416,6 +416,9 @@ struct World {
     media: Arc<FakeRoomService>,
     address: String,
     voice: String,
+    /// The guild's #general.
+    text: String,
+    guild: String,
     owner: String,
     alice: String,
     alice_id: String,
@@ -486,7 +489,7 @@ async fn build(app: TestApp, mock: Arc<Mock>, bot: Arc<Bot>, media: Arc<FakeRoom
         assert_eq!(app.post(&format!("/invites/{code}"), token, json!({})).await.0, StatusCode::OK);
     }
     let id = |user: &Value| user["id"].as_str().expect("id").to_owned();
-    World { app, mock, bot, media, address, voice, owner, alice, alice_id: id(&alice_user), carl, carl_id: id(&carl_user) }
+    World { app, mock, bot, media, address, voice, text, guild, owner, alice, alice_id: id(&alice_user), carl, carl_id: id(&carl_user) }
 }
 
 impl World {
@@ -1773,4 +1776,42 @@ async fn a_burst_of_skips_advances_one_item() {
     let (status, now) = w.app.patch(&w.path(), &w.carl, json!({"skip": false})).await;
     assert_eq!(status, StatusCode::OK, "the session goes on: {now}");
     assert_eq!((now["added_by"].as_str(), now["queue"].as_array().map(Vec::len)), (Some(w.carl_id.as_str()), Some(0)), "{now}");
+}
+
+/// docs/design/bot-control.md §9: a bot lists streams with the asking member's addons, and those sids stay that member's.
+#[tokio::test]
+async fn a_bot_lists_and_plays_streams_for_the_member_who_asked() {
+    use axum::http::Method;
+    let w = world().await;
+    let (bot_id, bot) = w.app.bot_in(&w.owner, &w.guild, "Claude").await;
+    w.link(&w.alice).await;
+    w.link(&w.carl).await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    w.join(&mut alice).await;
+    let mut carl = Client::identify(&w.address, &w.carl).await.0;
+    w.join(&mut carl).await;
+    let hers = w.app.say(&w.text, &w.alice, &format!("<@{bot_id}> play The Shawshank Redemption")).await;
+    let his = w.app.say(&w.text, &w.carl, &format!("<@{bot_id}> play it instead")).await;
+    let send = |method: Method, path: String, message: String, body: Option<Value>| {
+        let (app, bot) = (&w.app, bot.clone());
+        async move { app.send_with(method, &path, Some(&bot), &[("x-vokko-acting-for", message.as_str())], body).await }
+    };
+
+    let (status, error) = w.app.get("/stremio/streams/movie/tt0111161", &bot).await;
+    assert_eq!((status, error["code"].as_u64()), (StatusCode::FORBIDDEN, Some(20001)), "the header is required");
+    let (status, listing) = send(Method::GET, "/stremio/streams/movie/tt0111161".to_owned(), hers.clone(), None).await;
+    assert_eq!(status, StatusCode::OK, "{listing}");
+    let sid = World::sid(&listing, "A 1080p");
+    let (status, _) = send(Method::PUT, w.path(), his.clone(), Some(json!({"sid": sid}))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "carl cannot play what the bot listed for alice");
+    assert_eq!(w.app.put_json(&w.path(), &w.carl, json!({"sid": sid})).await.0, StatusCode::BAD_REQUEST, "nor can carl himself");
+    let (status, state) = send(Method::PUT, w.path(), hers.clone(), Some(json!({"sid": sid}))).await;
+    assert_eq!(status, StatusCode::OK, "{state}");
+    assert_eq!(
+        (state["started_by"].as_str(), state["added_by"].as_str(), state["via_bot_id"].as_str()),
+        (Some(w.alice_id.as_str()), Some(w.alice_id.as_str()), Some(bot_id.as_str()))
+    );
+    let (status, read) = send(Method::GET, w.path(), his.clone(), None).await;
+    assert_eq!((status, read["item"]["label"].as_str()), (StatusCode::OK, Some("A 1080p")), "{read}");
+    assert_eq!(send(Method::POST, format!("{}/viewer-token", w.path()), hers, None).await.0, StatusCode::FORBIDDEN, "not a bot route");
 }

@@ -22,6 +22,7 @@ use super::token::{self, Claims, VideoGrant};
 use super::watch::{CONTROL_BURST, CONTROL_PER_SECOND, require_in_voice};
 use super::{control, unix_millis, unix_now};
 use crate::access;
+use crate::acting::Actor;
 use crate::auth::{AuthUser, random_hex};
 use crate::crypto::Secret;
 use crate::error::{ApiErr, ApiResult};
@@ -46,7 +47,7 @@ const MAX_CUES: usize = 5000;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/channels/{id}/stremio", put(start).patch(control).delete(stop))
+        .route("/channels/{id}/stremio", put(start).patch(control).get(read).delete(stop))
         .route("/channels/{id}/stremio/viewer-token", post(viewer_token))
         .route("/channels/{id}/stremio/subtitles", get(addon_subtitles))
         .route("/channels/{id}/stremio/subtitles/{sid}", get(addon_cues))
@@ -57,7 +58,7 @@ pub fn routes() -> Router<AppState> {
 struct Queued {
     candidate: Candidate,
     info: TitleInfo,
-    added_by: i64,
+    added_by: Actor,
 }
 
 pub struct Session {
@@ -163,15 +164,17 @@ impl Session {
                     subtitle: queued.info.subtitle.clone(),
                     poster: queued.info.poster.clone(),
                     label: queued.candidate.label.clone(),
-                    added_by: Snowflake::from(queued.added_by),
+                    added_by: Snowflake::from(queued.added_by.user_id),
+                    via_bot_id: queued.added_by.via_bot.map(Snowflake::from),
                 })
                 .collect(),
         }
     }
 
     /// Notes who started the current item (call right after `begin`) and, for a resume, where it starts.
-    fn track(&mut self, info: &TitleInfo, owner: i64, began_ms: u64) {
-        self.tracked = Some(Tracked { owner, info: info.clone(), began_ms, foreign_seek: false, started_ms: unix_millis(), owner_left_at: None });
+    fn track(&mut self, info: &TitleInfo, owner: Actor, began_ms: u64) {
+        self.tracked =
+            Some(Tracked { owner: owner.user_id, info: info.clone(), began_ms, foreign_seek: false, started_ms: unix_millis(), owner_left_at: None });
         control::new_item(&mut self.control, Some(owner));
         self.position_ms = began_ms;
     }
@@ -369,12 +372,8 @@ async fn announce(state: &AppState, channel_id: i64, session: Option<StremioStat
 
 // ---- routes ----
 
-async fn start(
-    State(state): State<AppState>,
-    AuthUser(user_id): AuthUser,
-    Path(id): Path<String>,
-    ApiJson(body): ApiJson<StremioStartRequest>,
-) -> ApiResult<Response> {
+async fn start(State(state): State<AppState>, actor: Actor, Path(id): Path<String>, ApiJson(body): ApiJson<StremioStartRequest>) -> ApiResult<Response> {
+    let user_id = actor.user_id;
     let active = active(&state)?;
     let ctx = control::in_voice(&state, user_id, &id).await?;
     let channel_id = ctx.channel_id;
@@ -413,7 +412,7 @@ async fn start(
             updated_at_ms: unix_millis(),
             duration_ms: None,
             started_by: user_id,
-            control: control::new_session(user_id, &control::room(&state, channel_id)),
+            control: control::new_session(actor, &control::room(&state, channel_id)),
             queue: Vec::new(),
             candidate: listed.candidate.clone(),
             media: media.clone(),
@@ -438,7 +437,7 @@ async fn start(
         let token = bot_token(&state, channel_id, &session.room).ok_or_else(ApiErr::internal)?;
         let replaced = session.take_finished(None, unix_millis());
         session.begin(&listed.info, listed.candidate.clone(), media, headers, generation, token);
-        session.track(&listed.info, user_id, body.position_ms.unwrap_or(0));
+        session.track(&listed.info, actor, body.position_ms.unwrap_or(0));
         let desired = session.desired(&state, unix_millis()).ok_or_else(ApiErr::internal)?;
         (session.view(channel_id), desired, had_one, replaced)
     };
@@ -466,12 +465,8 @@ async fn start(
     Ok(Json(view).into_response())
 }
 
-async fn control(
-    State(state): State<AppState>,
-    AuthUser(user_id): AuthUser,
-    Path(id): Path<String>,
-    ApiJson(body): ApiJson<StremioPatchRequest>,
-) -> ApiResult<Response> {
+async fn control(State(state): State<AppState>, actor: Actor, Path(id): Path<String>, ApiJson(body): ApiJson<StremioPatchRequest>) -> ApiResult<Response> {
+    let user_id = actor.user_id;
     let active = active(&state)?;
     let ctx = control::in_voice(&state, user_id, &id).await?;
     let channel_id = ctx.channel_id;
@@ -481,7 +476,7 @@ async fn control(
     let queued = match &body.queue_add {
         Some(sid) => {
             let listed = playable(&state, "queue_add", sid, user_id)?;
-            Some(Queued { candidate: listed.candidate, info: listed.info, added_by: user_id })
+            Some(Queued { candidate: listed.candidate, info: listed.info, added_by: actor })
         }
         None => None,
     };
@@ -501,11 +496,11 @@ async fn control(
         if steers && !controller {
             return Err(ApiErr::missing_permissions());
         }
-        if body.queue_remove.and_then(|index| session.queue.get(index)).is_some_and(|queued| queued.added_by != user_id && !controller) {
+        if body.queue_remove.and_then(|index| session.queue.get(index)).is_some_and(|queued| queued.added_by.user_id != user_id && !controller) {
             return Err(ApiErr::missing_permissions());
         }
         if queued.is_some() {
-            control::quota(&ctx, &session.control, session.queue.iter().filter(|queued| queued.added_by == user_id).count(), STREMIO_QUEUE_PER_USER)?;
+            control::quota(&ctx, &session.control, session.queue.iter().filter(|queued| queued.added_by.user_id == user_id).count(), STREMIO_QUEUE_PER_USER)?;
         }
         if let Some(position) = body.position_ms.filter(|position| steer && session.duration_ms.is_some_and(|duration| *position > duration)) {
             return Err(ApiErr::invalid("position_ms", &format!("Must be between 0 and {} for this video.", session.duration_ms.unwrap_or(position))));
@@ -575,7 +570,14 @@ async fn control(
     Ok(Json(after).into_response())
 }
 
-async fn stop(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>) -> ApiResult<Response> {
+/// The channel's session, for someone in the call (a bot acting for them reads it this way).
+async fn read(State(state): State<AppState>, Actor { user_id, .. }: Actor, Path(id): Path<String>) -> ApiResult<Json<StremioState>> {
+    active(&state)?;
+    let channel_id = require_in_voice(&state, user_id, &id).await?;
+    state_of(&state, channel_id).map(Json).ok_or_else(|| ApiErr::conflict(40033, "Nothing is playing in this channel."))
+}
+
+async fn stop(State(state): State<AppState>, Actor { user_id, .. }: Actor, Path(id): Path<String>) -> ApiResult<Response> {
     active(&state)?;
     let ctx = control::in_voice(&state, user_id, &id).await?;
     let channel_id = ctx.channel_id;
@@ -833,7 +835,7 @@ pub(crate) async fn drop_queued_by(state: &AppState, user_id: i64) {
         .iter_mut()
         .filter_map(|(channel_id, session)| {
             let before = session.queue.len();
-            session.queue.retain(|queued| queued.added_by != user_id);
+            session.queue.retain(|queued| queued.added_by.user_id != user_id);
             (session.queue.len() != before).then(|| (*channel_id, session.view(*channel_id)))
         })
         .collect();

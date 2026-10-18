@@ -1,6 +1,7 @@
 //! What a bot token may call. Bots are denied by default: a request with a `Bot ` token reaches only the routes listed here,
 //! everything else (accounts, sessions, MFA, OAuth, friends, invites, guild creation, settings, ...) answers 403 20001.
-//! A route added later stays closed to bots until it is listed.
+//! A route added later stays closed to bots until it is listed. The media routes in `ACTING` are open to a bot only with
+//! `X-Vokko-Acting-For` (crate::acting): it acts for the member who asked, never as itself.
 use axum::extract::{MatchedPath, Request};
 use axum::http::Method;
 use axum::http::header::AUTHORIZATION;
@@ -79,6 +80,24 @@ const ALLOWED: &[(&str, u8)] = &[
     ("/webhooks/{id}", GET | PATCH | DELETE),
     ("/webhooks/{id}/{token}", GET | PATCH | DELETE | POST),
     ("/webhooks/{id}/{token}/messages/{mid}", GET | PATCH | DELETE),
+    // where a member is in voice; the Spotify catalog (read-only)
+    ("/guilds/{id}/voice-states/{user}", GET),
+    ("/spotify/search", GET),
+    ("/spotify/albums/{id}", GET),
+    ("/spotify/playlists/{id}", GET),
+    ("/spotify/artists/{id}", GET),
+    ("/spotify/tracks/{id}", GET),
+];
+
+/// Routes a bot may call only while acting for a member (`X-Vokko-Acting-For`); not the listener / viewer token routes.
+const ACTING: &[(&str, u8)] = &[
+    ("/channels/{id}/spotify", GET | PUT | PATCH | DELETE),
+    ("/channels/{id}/stremio", GET | PUT | PATCH | DELETE),
+    ("/stremio/search", GET),
+    ("/stremio/catalog", GET),
+    ("/stremio/meta/{kind}/{id}", GET),
+    ("/stremio/streams/{kind}/{video_id}", GET),
+    ("/stremio/continue", GET),
 ];
 
 fn method_bit(method: &Method) -> u8 {
@@ -92,18 +111,24 @@ fn method_bit(method: &Method) -> u8 {
     }
 }
 
-/// Whether a bot may call `method` on the route registered as `route` (with or without the `/api/v1` prefix).
-pub fn bot_may_call(method: &Method, route: &str) -> bool {
+fn listed(list: &[(&str, u8)], method: &Method, route: &str) -> bool {
     let route = route.strip_prefix("/api/v1").unwrap_or(route);
     let bit = method_bit(method);
-    ALLOWED.iter().any(|(pattern, methods)| *pattern == route && methods & bit != 0)
+    list.iter().any(|(pattern, methods)| *pattern == route && methods & bit != 0)
+}
+
+/// Whether a bot may call `method` on the route registered as `route` (with or without the `/api/v1` prefix); `acting` = the
+/// request carries `X-Vokko-Acting-For`.
+pub fn bot_may_call(method: &Method, route: &str, acting: bool) -> bool {
+    listed(ALLOWED, method, route) || (acting && listed(ACTING, method, route))
 }
 
 /// Middleware on the API router: a `Bot ` token on an unlisted route is refused before the handler runs.
 pub async fn middleware(request: Request, next: Next) -> Response {
     let bot = request.headers().get(AUTHORIZATION).and_then(|value| value.to_str().ok()).is_some_and(|value| value.trim_start().starts_with("Bot "));
     if bot && !request.method().eq(&Method::OPTIONS) {
-        let allowed = request.extensions().get::<MatchedPath>().is_some_and(|route| bot_may_call(request.method(), route.as_str()));
+        let acting = request.headers().contains_key(crate::acting::ACTING_FOR);
+        let allowed = request.extensions().get::<MatchedPath>().is_some_and(|route| bot_may_call(request.method(), route.as_str(), acting));
         if !allowed {
             return ApiErr::bots_forbidden().into_response();
         }
@@ -117,14 +142,26 @@ mod tests {
 
     #[test]
     fn listed_routes_and_methods_only() {
-        assert!(bot_may_call(&Method::POST, "/api/v1/channels/{id}/messages"));
-        assert!(bot_may_call(&Method::POST, "/interactions/{id}/{token}/callback"));
-        assert!(!bot_may_call(&Method::POST, "/invites/{code}"));
-        assert!(bot_may_call(&Method::GET, "/invites/{code}"));
-        assert!(!bot_may_call(&Method::POST, "/guilds"));
-        assert!(!bot_may_call(&Method::POST, "/users/@me/relationships"));
-        assert!(!bot_may_call(&Method::GET, "/auth/sessions"));
-        assert!(!bot_may_call(&Method::POST, "/users/@me/delete"));
-        assert!(!bot_may_call(&Method::DELETE, "/guilds/{id}"));
+        assert!(bot_may_call(&Method::POST, "/api/v1/channels/{id}/messages", false));
+        assert!(bot_may_call(&Method::POST, "/interactions/{id}/{token}/callback", false));
+        assert!(!bot_may_call(&Method::POST, "/invites/{code}", false));
+        assert!(bot_may_call(&Method::GET, "/invites/{code}", false));
+        assert!(!bot_may_call(&Method::POST, "/guilds", false));
+        assert!(!bot_may_call(&Method::POST, "/users/@me/relationships", false));
+        assert!(!bot_may_call(&Method::GET, "/auth/sessions", false));
+        assert!(!bot_may_call(&Method::POST, "/users/@me/delete", false));
+        assert!(!bot_may_call(&Method::DELETE, "/guilds/{id}", true));
+    }
+
+    #[test]
+    fn media_control_needs_the_acting_header() {
+        assert!(bot_may_call(&Method::GET, "/spotify/search", false), "the catalog is read-only");
+        assert!(!bot_may_call(&Method::PATCH, "/channels/{id}/spotify", false));
+        assert!(bot_may_call(&Method::PATCH, "/channels/{id}/spotify", true));
+        assert!(!bot_may_call(&Method::GET, "/stremio/streams/{kind}/{video_id}", false));
+        assert!(bot_may_call(&Method::GET, "/stremio/streams/{kind}/{video_id}", true));
+        assert!(!bot_may_call(&Method::POST, "/channels/{id}/spotify/listener-token", true));
+        assert!(!bot_may_call(&Method::POST, "/channels/{id}/stremio/viewer-token", true));
+        assert!(!bot_may_call(&Method::POST, "/users/@me/stremio/login", true));
     }
 }
