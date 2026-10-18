@@ -307,6 +307,17 @@ describe('VokkoBot gate per role', () => {
       expect(await run('bridge-shared', { guilds: false }, ask(GENERAL), Date.now(), hidden)).toBe('deliver')
       expect(await run('bridge', {}, ask(GENERAL), null, hidden)).toBe('deliver')
     })
+    test('tools follow the gate: a groups entry for a private channel is not reachable while answering as the fallback', async () => {
+      const groups = { [GENERAL]: { requireMention: false, allowFrom: [] }, [OTHER]: { requireMention: false, allowFrom: [] } }
+      const hideGeneral: Server = { ...hidden, overwrites: [ow(GUILD, 0, 0n, VIEW_CHANNEL), ow('R', 0, VIEW_CHANNEL, 0n)] }
+      const fallback = gateBot('channel', { guilds: false, groups }, 'stopped', hideGeneral) as any
+      await expect(fallback.allowedChannel(GENERAL)).rejects.toThrow(/not allowlisted/)
+      await expect(fallback.history(GENERAL, 5)).rejects.toThrow(/not allowlisted/)
+      const open = gateBot('channel', { guilds: false, groups }, 'stopped', {}) as any
+      await expect(open.allowedChannel(GENERAL)).resolves.toBeUndefined()
+      const own = gateBot('channel', { groups }, null, hideGeneral) as any // guilds on: the owner's choice
+      await expect(own.allowedChannel(GENERAL)).resolves.toBeUndefined()
+    })
     test('@everyone with ADMINISTRATOR sees everything; a failed permission lookup counts as private', async () => {
       const admin: Server = { roles: [{ id: GUILD, permissions: String(1n << 3n) }], overwrites: [ow(GUILD, 0, 0n, VIEW_CHANNEL)] }
       expect(await run('channel', { guilds: false }, ask(GENERAL), 'stopped', admin)).toBe('deliver')

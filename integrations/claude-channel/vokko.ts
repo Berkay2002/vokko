@@ -471,7 +471,7 @@ export class VokkoBot {
     // Last, because it may cost API calls: the owner always may; everyone else needs Use Application Commands in this channel.
     if (senderId !== this.ownerId && !((await this.bitsIn(msg.guild_id, msg.channel_id, senderId)) & USE_APPLICATION_COMMANDS)) return { action: 'drop' }
     // The plugin answering for a bridge that is out (a handoff, or its heartbeat gone): this session is one conversation, so only channels everyone can see.
-    if (this.cfg.role === 'channel' && access.guilds === false && !(await this.publicChannel(msg.guild_id, msg.channel_id))) return { action: 'drop' }
+    if (!(await this.publicOrOwn(access, msg.guild_id, msg.channel_id))) return { action: 'drop' }
     // A channel the bot answers by default, not by a groups entry: only where it can write too (not a read-only channel).
     if (!access.groups[this.gateKey(msg.channel_id)] && this.me && !((await this.bitsIn(msg.guild_id, msg.channel_id, this.me.id)) & SEND_MESSAGES)) return { action: 'drop' }
     this.adopted.set(msg.channel_id, Date.now() + ADOPT_MS)
@@ -546,6 +546,11 @@ export class VokkoBot {
 `)
       return false
     }
+  }
+
+  /** Answering a bridge's guilds as its fallback (`guilds false`): only public channels, in the gate and for tools alike. */
+  private async publicOrOwn(access: Access, guildId: string, channelId: string): Promise<boolean> {
+    return this.cfg.role !== 'channel' || access.guilds !== false || (await this.publicChannel(guildId, channelId))
   }
 
   /** ownsDms for this sender; a plugin with no bridge set up keeps everyone's DMs. */
@@ -721,7 +726,7 @@ export class VokkoBot {
     if (ch?.type === 1) {
       const userId = ch.recipients?.find(u => u.id !== this.me?.id)?.id
       if (userId && this.dmsOwned(access, userId) && access.allowFrom.includes(userId)) return
-    } else if (ch && ((this.guildsOwned(access) && this.gateKey(id) in access.groups) || (this.adopted.get(id) ?? 0) > Date.now())) {
+    } else if (ch && ((this.guildsOwned(access) && this.gateKey(id) in access.groups && (await this.publicOrOwn(access, ch.guild_id ?? '', id))) || (this.adopted.get(id) ?? 0) > Date.now())) {
       // a groups entry, or a channel someone triggered Claude in: not every channel it merely sees
       return
     }
