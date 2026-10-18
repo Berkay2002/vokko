@@ -113,7 +113,7 @@ export function ProfileCardHost() {
                     </span>
                   ) : relationship?.type === RelationshipType.OutgoingRequest ? (
                     <span className="profile-friend">Request sent</span>
-                  ) : (
+                  ) : user.bot ? null : (
                     <button
                       type="button"
                       className="btn btn-secondary"

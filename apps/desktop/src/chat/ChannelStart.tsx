@@ -58,7 +58,7 @@ function DmRelationRow({ user, name }: { user: User; name: string }) {
         <button type="button" className="chat-start-btn" disabled={busy} onClick={() => void run('DELETE')}>Ignore</button>
       </>;
       case RelationshipType.Blocked: return null;
-      default: return <button type="button" className="chat-start-btn" disabled={busy} onClick={() => void run('PUT')}>Add Friend</button>;
+      default: return user.bot ? null : <button type="button" className="chat-start-btn" disabled={busy} onClick={() => void run('PUT')}>Add Friend</button>;
     }
   })();
 
