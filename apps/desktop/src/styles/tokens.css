@@ -1,5 +1,5 @@
 /* Design tokens: every colour, size and radius used by the UI lives here so themes and corrections only touch this file.
-   Names and per-theme values are Discord's semantic tokens as resolved in the web client bundle (research/discord-client-facts.md Q6.2):
+   Names and per-theme values are Discord's semantic tokens as resolved in the web client bundle:
    four value sets selected by a class on <html>: theme-dark (default), theme-ash, theme-onyx, theme-light.
    The theme blocks below are generated from the Q6 tables; edit the table source, not the values here.
    Our own additions are marked "vokko". Translucent overlays are rgba() of #97979f. */

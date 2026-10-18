@@ -1,7 +1,7 @@
 # Parity inventory (Discord web client, captured 2026-10-11)
 
 The target list for "looks the same / works the same". Each row has an id, a one-line acceptance description and a pointer to the private
-reference (`.claude/reference/discord-2026-10-11/`, outside git; paths below are relative to it). Track visual and behavioural parity
+reference (the captures, kept outside git; paths below are relative to them). Track visual and behavioural parity
 separately. "REF: none" means the screen/behaviour is known to exist in Discord but has not been captured yet (see `INDEX.md` there).
 No usernames, message text or server names appear in this file by design.
 

@@ -7,7 +7,7 @@ default-members = ["crates/*", "apps/cli", "xtask"]
 version = "0.1.13"
 edition = "2024"
 rust-version = "1.95"
-license = "Apache-2.0"
+license = "AGPL-3.0-or-later"
 
 [workspace.dependencies]
 vokko-protocol = { path = "crates/protocol" }

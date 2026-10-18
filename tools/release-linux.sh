@@ -26,7 +26,13 @@ git bundle create -q "$OUT/vokko.bundle" HEAD
 # The key goes in through the environment (WSLENV), never on a command line or into a file inside the distro.
 TAURI_SIGNING_PRIVATE_KEY=$(cat "$HOME/.vokko/updater.key")
 TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$(cat "$HOME/.vokko/updater.key.password")
-export TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD VITE_VOKKO_API=${VITE_VOKKO_API:-$(node -e 'console.log(new URL(require(process.argv[1]).plugins.updater.endpoints[0]).origin)' "$PWD/$CONFIG")}
+# An empty API would build a mock app that talks to no server, so stop instead.
+API=${VITE_VOKKO_API:-$(node -e 'console.log(new URL(require(process.argv[1]).plugins.updater.endpoints[0]).origin)' "$PWD/$CONFIG" 2>/dev/null || true)}
+{ [ -n "$API" ] && [ "$API" != null ]; } || {
+  echo "no API origin: set VITE_VOKKO_API or put plugins.updater.endpoints[0] (an https URL) in $CONFIG" >&2
+  exit 1
+}
+export TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD VITE_VOKKO_API=$API
 export WSLENV=TAURI_SIGNING_PRIVATE_KEY:TAURI_SIGNING_PRIVATE_KEY_PASSWORD:VITE_VOKKO_API
 
 # -e skips the default shell, which would re-parse this script. APPIMAGE_EXTRACT_AND_RUN: WSL has no FUSE for the linuxdeploy AppImage. NO_STRIP: its bundled strip can't read current binaries.

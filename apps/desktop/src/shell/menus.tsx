@@ -1,4 +1,4 @@
-// Context-menu and dropdown contents, ordered like Discord's menus (research/discord-ui-inventory.md Part A).
+// Context-menu and dropdown contents, ordered like Discord's menus.
 // Entries the backend has no data for are present but disabled with a "Not available yet" tooltip.
 
 import type { ReactNode } from "react";

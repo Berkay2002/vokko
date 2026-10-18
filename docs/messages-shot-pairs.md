@@ -1,7 +1,7 @@
 # messages: my shot <-> reference shot
 
 Mine: `artifacts/messages/` (outside the repo, 1489x1097 css at 1.25, Onyx, sv-SE; regenerate with `VOKKO_SHOTS_DIR=<dir> npx playwright test -c e2e/messages.config.ts messages.shots.spec.ts`).
-Reference root: `.claude/reference/discord-2026-10-11/` (`ms` = `messages-states/`, `mu` = `messages-user/`).
+Reference root: the Discord reference captures, kept outside git (`ms` = `messages-states/`, `mu` = `messages-user/`).
 
 | mine | reference |
 |---|---|

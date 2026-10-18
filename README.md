@@ -84,4 +84,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md). Third-par
 
 ## License
 
-[Apache-2.0](LICENSE). Repository: https://github.com/Berkay2002/vokko
+Vokko is licensed under [AGPL-3.0-or-later](LICENSE). The protocol types (`crates/protocol`) and the bot examples (`examples/`) are
+[Apache-2.0](crates/protocol/LICENSE), so bots and third-party clients can use any license. The bundled games keep their own licenses
+(`apps/desktop/public/games/*/LICENSE-*`). Repository: https://github.com/Berkay2002/vokko

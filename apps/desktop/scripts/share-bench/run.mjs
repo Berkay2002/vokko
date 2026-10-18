@@ -5,7 +5,7 @@
 //        [--role loop --profile 640032] [--pub chrome] [--wvargs "<extra browser args>"] [--port-base 1491]
 //
 // Starts livekit-server (ports --port-base + 1..3) and Vite (--port-base), a "game" (load.html: a full-window WebGL shader,
-// GPU-bound at ~80-90 fps with --iter 400 on an desktop GPU, in a kiosk Chrome window on the display at --load-x), the publisher
+// GPU-bound at ~80-90 fps with --iter 400 on a desktop GPU, in a kiosk Chrome window on the display at --load-x), the publisher
 // in the real WebView2 runtime (any WebView2 host: a release vokko-desktop.exe on its own data folders, navigated to
 // share.html, which publishes with the app's own buildScreenShare plan and H.264 profile order), and a viewer in Playwright
 // Chromium. Per run: the game's frame times alone and while shared, the sender's encoder stats per layer, the viewer's fps,

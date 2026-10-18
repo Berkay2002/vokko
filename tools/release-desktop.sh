@@ -40,6 +40,8 @@ main() {
   }
   API=$(node -e 'console.log(new URL(require(process.argv[1]).plugins.updater.endpoints[0]).origin)' "$CONFIG")
   case $API in https://*.example.com | https://example.com) echo "$CONFIG still points at $API" >&2; exit 1 ;; esac
+  node -e 'process.exit(String(require(process.argv[1]).plugins.updater.pubkey).includes("REPLACE_ME") ? 1 : 0)' "$CONFIG" ||
+    { echo "$CONFIG still has the REPLACE_ME updater pubkey: set the public key from \`npx tauri signer generate\`" >&2; exit 1; }
 
   if [ -n "$DRY" ]; then
     local current

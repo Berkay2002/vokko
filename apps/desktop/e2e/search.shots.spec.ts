@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { openStockTalk } from './helpers';
 
-// Screenshots for the reference comparison (names follow .claude/reference/discord-2026-10-11/search/NN-*).
+// Screenshots for comparing against the reference captures (named search/NN-*).
 // Capture with VOKKO_SHOTS_DIR=<dir>; skipped otherwise.
 test.use({ viewport: { width: 1440, height: 900 } });
 

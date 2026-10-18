@@ -3,7 +3,7 @@ name = "vokko-protocol"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
+license = "Apache-2.0"
 
 [lints]
 workspace = true

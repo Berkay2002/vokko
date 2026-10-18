@@ -1,6 +1,6 @@
 # Contributing to Vokko
 
-Thanks for helping. Vokko is licensed under Apache-2.0; by contributing you agree your work is released under it.
+Thanks for helping. Vokko is licensed under AGPL-3.0-or-later, except `crates/protocol` and `examples/` (Apache-2.0); contributions are accepted under the license of the files they change (inbound = outbound).
 
 ## Setup
 
