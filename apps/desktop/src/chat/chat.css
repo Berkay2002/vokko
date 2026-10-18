@@ -278,7 +278,7 @@ html.message-compact { --chat-gutter: 80px; }
 .chat-image-action:hover { background: var(--chat-hover); color: var(--chat-icon-hover); }
 .chat-image-spoiler-label { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 4px 8px; border-radius: 20px; background: var(--chat-scrim); color: var(--chat-on-brand); font-size: 12px; font-weight: 700; letter-spacing: 0.04em; }
 .chat-video { max-width: 400px; max-height: 300px; border-radius: 8px; background: var(--chat-spoiler-hover); }
-.chat-file { display: flex; align-items: center; gap: 8px; width: 432px; max-width: 100%; padding: 10px; border: 1px solid var(--chat-bg-tertiary); border-radius: 8px; background: var(--chat-bg-secondary); }
+.chat-file { display: flex; align-items: center; gap: 8px; width: 432px; max-width: 100%; padding: 10px; border: 1px solid var(--chat-bg-tertiary); border-radius: 8px; background: var(--chat-input-bg); }
 .chat-file-icon { flex: none; color: var(--chat-icon); }
 .chat-file-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .chat-file-name { color: var(--chat-link); font-size: 16px; line-height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none; }
@@ -731,3 +731,34 @@ span.md-emoji { width: auto; height: auto; line-height: inherit; }
 .chat-emoji-pop-body { min-width: 0; }
 .chat-emoji-pop-body b { display: block; font-size: 16px; line-height: 20px; font-weight: 600; color: var(--chat-text-strong); }
 .chat-emoji-pop-body p { margin: 4px 0 0; font-size: 14px; line-height: 18px; color: var(--chat-text-muted); }
+
+/* Voice messages: the composer's mic, the recorder that replaces the message box, and Discord's pill player. */
+.chat-composer-btn.voice-mic { margin-right: 8px; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.chat-composer-btn.voice-mic.recording { color: var(--chat-on-brand); background: var(--chat-danger-bg); border-radius: 50%; }
+.voice-recorder { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 12px; min-height: 55px; padding: 0 12px; outline: none; }
+.voice-recorder .voice-recorder-cancel, .voice-recorder .voice-recorder-send { flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; color: var(--chat-icon); }
+.voice-recorder .voice-recorder-cancel:hover { color: var(--chat-danger); background: var(--chat-hover); }
+.voice-recorder .voice-recorder-send { background: var(--chat-brand); color: var(--chat-on-brand); }
+.voice-recorder .voice-recorder-send:hover { background: var(--chat-brand-hover); }
+.voice-recorder-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--chat-danger-bg); animation: voice-pulse 1.2s ease-in-out infinite; }
+@keyframes voice-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .voice-recorder-dot { animation: none; } }
+.voice-recorder-time { flex: none; min-width: 36px; font-size: 14px; font-weight: 500; color: var(--chat-text-strong); font-variant-numeric: tabular-nums; }
+.voice-live { flex: 1 1 auto; min-width: 0; height: 28px; display: flex; align-items: center; justify-content: flex-end; gap: 2px; overflow: hidden; }
+.voice-live span { flex: none; width: 3px; border-radius: 2px; background: var(--chat-brand); transition: height 50ms linear; }
+.voice-recorder-hint { flex: none; font-size: 14px; color: var(--chat-text-muted); }
+.voice-recorder.cancelling .voice-live span, .voice-recorder.cancelling .voice-recorder-dot { background: var(--chat-danger-bg); }
+.voice-recorder.cancelling .voice-recorder-hint { color: var(--chat-danger); }
+
+.voice-player { display: inline-flex; align-items: center; gap: 12px; max-width: 100%; height: 48px; padding: 0 12px 0 8px; border-radius: 24px; background: var(--chat-input-bg); }
+/* two classes: `.chat-view button` resets button backgrounds */
+.voice-player .voice-player-play { flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: var(--chat-brand); color: var(--chat-on-brand); }
+.voice-player .voice-player-play:hover { background: var(--chat-brand-hover); }
+.voice-player-wave { flex: 0 1 auto; min-width: 0; height: 24px; display: flex; align-items: center; gap: 2px; overflow: hidden; cursor: pointer; border-radius: 4px; }
+.voice-player-wave span { flex: none; width: 3px; border-radius: 2px; background: var(--chat-icon); opacity: 0.45; }
+.voice-player-wave span.played { background: var(--chat-text-strong); opacity: 1; }
+.voice-player-time { flex: none; min-width: 32px; font-size: 12px; color: var(--chat-text-muted); font-variant-numeric: tabular-nums; }
+.voice-player .voice-player-speed { flex: none; height: 20px; min-width: 34px; padding: 0 6px; border-radius: 10px; background: var(--chat-hover); color: var(--chat-text); font-size: 12px; font-weight: 700; }
+.voice-player .voice-player-speed:hover { background: var(--chat-selected); }
+.voice-player-download { flex: none; display: grid; place-items: center; color: var(--chat-icon); }
+.voice-player-download:hover { color: var(--chat-icon-hover); }

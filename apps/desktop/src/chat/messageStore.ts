@@ -108,7 +108,7 @@ async function refreshLatest(channelId: Snowflake): Promise<void> {
   } catch { /* the next open retries */ }
 }
 
-export interface SendInput { content: string; attachments?: Message['attachments']; meta?: PendingAttachmentMeta[]; reply?: Message | null; mention?: boolean; stickers?: StickerItem[]; tts?: boolean }
+export interface SendInput { content: string; attachments?: Message['attachments']; meta?: PendingAttachmentMeta[]; reply?: Message | null; mention?: boolean; stickers?: StickerItem[]; tts?: boolean; flags?: number }
 /** The part of a composer upload a queued send needs (see `Upload` in draftStore). */
 export interface QueuedUpload {
   localId: string;
@@ -125,6 +125,7 @@ function buildRequest(nonce: string, content: string, input: SendInput): CreateM
   else if (input.attachments?.length) req.attachment_ids = input.attachments.map(a => a.id);
   if (input.stickers?.length) req.sticker_ids = input.stickers.map(s => s.id);
   if (input.tts) req.tts = true;
+  if (input.flags) req.flags = input.flags;
   if (input.reply) req.message_reference = { message_id: input.reply.id };
   if (input.reply && input.mention === false) req.allowed_mentions = { replied_user: false };
   return req;
@@ -269,6 +270,7 @@ export const messageStore = {
       message_reference: input.reply ? { message_id: input.reply.id, channel_id: channelId, guild_id: input.reply.guild_id } : null,
       referenced_message: input.reply ?? null, nonce,
       ...(input.stickers?.length ? { sticker_items: input.stickers } : {}),
+      ...(input.flags ? { flags: input.flags } : {}),
     };
     // Sending is an ack of everything above: the new-messages divider and the unread banner go away at once.
     update(channelId, s => ({ ...s, lastReadAtOpen: null, markedUnread: false, pending: [...s.pending, { nonce, message, state: 'sending', request: req }] }));

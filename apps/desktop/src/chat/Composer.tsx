@@ -24,6 +24,7 @@ import { CreatePollModal } from '../polls/CreatePollModal';
 import { ComposerInput, type ComposerField } from './composer/ComposerInput';
 import { useShortcut } from '../keyboard';
 import { useKeyToken, useKeyedState } from './keyedState';
+import { MicButton, VoiceHoldOverlay, VoiceRecorderBar, canRecordVoice, sendVoiceMessage, useHoldToRecord, useVoiceRecorder } from './VoiceMessage';
 
 const MAX_LEN = 2000;
 // Discord client timings: POST at most every 8 s; the first one waits 1.5 s unless the previous was 16+ s ago;
@@ -112,6 +113,23 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
     if (!pollGuild || !chat.channel || !member) return true;
     return hasBit(channelPermissions(pollGuild, memberLike(member), chat.channel), Perm.SEND_POLLS);
   }, [pollGuild, pollMembers, chat.channel, chat.me.id]);
+  // Voice messages: DMs always, servers with SEND_VOICE_MESSAGES and ATTACH_FILES; the browser must be able to record.
+  const canVoice = useMemo(() => {
+    if (!canRecordVoice()) return false;
+    const member = pollMembers[chat.me.id];
+    if (!pollGuild || !chat.channel || !member) return !chat.guildId;
+    const perms = channelPermissions(pollGuild, memberLike(member), chat.channel);
+    return hasBit(perms, Perm.SEND_VOICE_MESSAGES) && hasBit(perms, Perm.ATTACH_FILES);
+  }, [pollGuild, pollMembers, chat.channel, chat.me.id, chat.guildId]);
+  const sendClip = (clip: Parameters<typeof sendVoiceMessage>[2]) => {
+    void sendVoiceMessage(channelId, chat.me, clip, replyTo, mentionReply);
+    onCancelReply();
+    onSent();
+  };
+  const recorder = useVoiceRecorder(clip => { if (clip) sendClip(clip); });
+  const hold = useHoldToRecord(recorder, sendClip);
+  const cancelRecording = recorder.cancel;
+  useEffect(() => cancelRecording, [channelId, cancelRecording]); // a recording never follows the user into another channel
   const [expr, setExpr] = useState<ExpressionTab | null>(null);
   const [appsOpen, setAppsOpen] = useState(false);
   const [dismissed, setDismissed] = useState<string | null>(null);
@@ -382,6 +400,10 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
         </div>)}
       </div>}
       <div className="chat-composer-row">
+        {recorder.recording && !phone
+          ? <VoiceRecorderBar elapsed={recorder.elapsed} live={recorder.live} onCancel={() => { recorder.cancel(); area.current?.focus(); }}
+            onSend={() => { void recorder.stop().then(clip => { if (clip) sendClip(clip); }); }} />
+          : recorder.recording ? <VoiceHoldOverlay elapsed={recorder.elapsed} live={recorder.live} cancelling={hold.cancelling} /> : <>
         <Tooltip content="Attach" side="top"><button ref={plusBtn} type="button" className="chat-composer-btn plus" aria-label="Attach a file" onClick={() => setPlusOpen(v => !v)}><Plus size={20} /></button></Tooltip>
         {phone
           ? <BottomSheet open={plusOpen} onClose={() => setPlusOpen(false)} label="Attach">
@@ -413,6 +435,11 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
           onClose={() => setExpr(null)} onPickEmoji={e => { setExpr(null); insertEmoji(e.id ? emojiMarkup({ id: e.id, name: e.name, animated: !!e.animated }) : e.name); }}
           channelId={channelId} onPickGif={(gif: Gif) => sendMedia({ content: gif.url })} onPickSticker={s => sendMedia({ content: '', stickers: [s] })} />
         <AppLauncherPopout anchor={appsBtn} open={appsOpen} onClose={() => setAppsOpen(false)} channelId={channelId} onPick={next => setTextAt(next, next.length)} />
+        </>}
+        {/* Same slot while recording, so a phone's held press keeps its pointer capture. */}
+        {canVoice && !hasText && uploads.length === 0 && !(recorder.recording && !phone) && (phone
+          ? <MicButton recording={recorder.recording} {...hold.handlers} />
+          : <MicButton onClick={() => { setExpr(null); void recorder.start(); }} />)}
       </div>
       {stickerHits.length > 0 && <div className="chat-sticker-suggest" role="listbox" aria-label="Sticker suggestions">
         {stickerHits.map(s => <button key={s.id} type="button" role="option" aria-selected={false} className="chat-sticker-suggest-item" title={s.name}

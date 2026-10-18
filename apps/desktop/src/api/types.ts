@@ -333,6 +333,8 @@ export interface Attachment {
   width: number | null;
   height: number | null;
   description?: string | null; // alt text, max 1024 chars
+  duration_secs?: number; // voice messages only: length in seconds
+  waveform?: string; // voice messages only: base64 of up to 256 amplitude bytes (0-255)
   // Spoiler: Discord convention, filename starts with "SPOILER_" (clients blur until clicked).
 }
 
@@ -423,6 +425,7 @@ export enum MessageFlags {
   SuppressEmbeds = 1 << 2,
   Ephemeral = 1 << 6, // interaction response visible only to the user who ran the command ("Only you can see this")
   Loading = 1 << 7, // deferred interaction response: "<bot> is thinking..." until the bot edits @original
+  IsVoiceMessage = 1 << 13, // one audio attachment with duration_secs + waveform, no content; needs SEND_VOICE_MESSAGES
 }
 
 export enum MessageReferenceType {
@@ -1373,6 +1376,7 @@ export interface CreateMessageRequest {
   attachments?: PendingAttachmentMeta[]; // same ids with optional rename / alt text; use instead of attachment_ids
   allowed_mentions?: AllowedMentions; // omitted = parse everything, replied_user true
   poll?: PollCreateRequest; // makes a poll message: content optional, no attachments (SEND_POLLS in guild channels)
+  flags?: number; // only MessageFlags.IsVoiceMessage is read (exactly one audio attachment with duration_secs + waveform, no content)
 }
 export interface AllowedMentions {
   parse?: ("users" | "roles" | "everyone")[];
@@ -1469,6 +1473,8 @@ export interface PendingAttachmentMeta {
   id: Snowflake; // pending attachment id from POST /channels/{id}/attachments
   filename?: string; // rename before sending; prefix "SPOILER_" marks a spoiler
   description?: string; // alt text, max 1024 chars
+  duration_secs?: number; // voice message: 0 < s <= 1200
+  waveform?: string; // voice message: base64 of 1-256 amplitude bytes
 }
 export interface EditMessageRequest {
   content?: string;

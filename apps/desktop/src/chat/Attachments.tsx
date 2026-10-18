@@ -8,6 +8,7 @@ import { ServerTag } from './ServerTag';
 import { AnimatedImage, Tooltip, resolveUrl, useShowImageDescriptions } from './shell';
 import { openForward } from '../media/store';
 import { formatBytes, formatFullDate, formatMessageTimestamp, isSpoilerName } from './util';
+import { VoicePlayer, isVoiceMessage } from './VoiceMessage';
 
 export const isImage = (a: Attachment): boolean => !!a.content_type?.startsWith('image/') || /\.(png|jpe?g|gif|webp|avif|svg|bmp)$/i.test(a.filename);
 const isVideo = (a: Attachment): boolean => !!a.content_type?.startsWith('video/');
@@ -113,6 +114,7 @@ export function Attachments({ message }: { message: Message }) {
   const chat = useChat();
   const showDescriptions = useShowImageDescriptions();
   if (message.attachments.length === 0) return null;
+  if (isVoiceMessage(message) && message.attachments[0]) return <div className="chat-attachments"><VoicePlayer attachment={message.attachments[0]} /></div>;
   // Settings > Chat > "Display images, videos and lolcats": off shows every upload as a file card.
   const inline = chat.display.inlineAttachmentMedia;
   const images: { a: Attachment; index: number }[] = [];
