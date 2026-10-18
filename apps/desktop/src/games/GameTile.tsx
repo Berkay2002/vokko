@@ -29,6 +29,7 @@ import {
   leaderOf,
   sandboxFor,
   trustedManifest,
+  webGameWrapper,
   type GameErrorCode,
   type GameToHost,
   type Player,
@@ -108,6 +109,7 @@ function WebGameFrame({ session, sandbox }: { session: GameSession; sandbox: str
     }
   }, [room, session.session_id]);
   const ratio = ASPECT[game.aspect] ?? null;
+  const wrapper = webGameWrapper();
   return (
     <div className="game-stage">
       <div className={`game-frame-box${ratio === null ? " fill" : ""}`} style={ratio === null ? undefined : ({ "--game-ar": ratio } as CSSProperties)}>
@@ -115,7 +117,7 @@ function WebGameFrame({ session, sandbox }: { session: GameSession; sandbox: str
         <iframe
           key={src}
           className="game-frame"
-          src={src}
+          src={wrapper ?? src}
           title={`${game.name} (game from ${originLabel(game)})`}
           sandbox={sandbox}
           allow={frameAllow(game)}
@@ -123,7 +125,10 @@ function WebGameFrame({ session, sandbox }: { session: GameSession; sandbox: str
           // Only the app's origin, never a path: Shell Shockers throws on `new URL(document.referrer)` with no referrer.
           referrerPolicy="strict-origin"
           data-room={room && src === room ? "joined" : undefined}
-          onLoad={() => setReady(true)}
+          onLoad={event => {
+            if (wrapper) event.currentTarget.contentWindow?.postMessage({ type: "load", url: src, sandbox, allow: frameAllow(game) }, new URL(wrapper).origin);
+            setReady(true);
+          }}
           {...{ credentialless: "" }}
         />
         {!ready && (

@@ -18,6 +18,7 @@ import {
   SANDBOX_BUILTIN,
   SANDBOX_THIRD_PARTY,
   SANDBOX_WEB,
+  webGameWrapper,
   type GameToHost,
 } from "./frameHost";
 
@@ -247,5 +248,14 @@ describe("voice reducer GAME_UPDATE", () => {
     expect(voiceReducer(m, { type: "game", channelId: "10", state: null })).toBe(m);
     m = voiceReducer(m, { type: "channelDelete", channelId: "20" });
     expect(m.games).toEqual({});
+  });
+});
+
+describe("webGameWrapper", () => {
+  it("wraps website games only in the WebKit apps, and only on an http(s) host", () => {
+    expect(webGameWrapper("tauri://localhost", API)).toBe(`${API}/web-game.html`);
+    expect(webGameWrapper("http://tauri.localhost", API), "WebView2 sends a referrer itself").toBeNull();
+    expect(webGameWrapper(APP, APP), "browser and dev builds").toBeNull();
+    expect(webGameWrapper("tauri://localhost", "tauri://localhost"), "mock build: no https host to use").toBeNull();
   });
 });

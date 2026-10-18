@@ -4,5 +4,9 @@
 <dict>
   <key>NSAppleEventsUsageDescription</key>
   <string>Vokko reads the song playing in the Spotify app to show it as your status.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Vokko uses your microphone for voice channels and calls.</string>
+  <key>NSCameraUsageDescription</key>
+  <string>Vokko uses your camera for video in voice channels and calls.</string>
 </dict>
 </plist>

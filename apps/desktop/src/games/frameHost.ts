@@ -4,6 +4,7 @@
 // Website games (kind "web") get no port at all: they run their own lobby, so only the frame and the room-link rule live here.
 
 import { API_ORIGIN, MOCK } from "../api/config";
+import { EMBED_ORIGIN } from "../watch/embed";
 import { GAME_RELAY_MAX_BYTES, type GameManifest, type GamePlayer } from "../api/types";
 import { BUILTIN_PREFIX, builtinGame, isBuiltin, isWebGame } from "./builtin";
 
@@ -102,6 +103,15 @@ const hostsOf = (origins: string[]): string[] =>
 
 /** The `allow` attribute for the game's frame: nothing for SDK games, ALLOW_WEB for website games. */
 export const frameAllow = (game: GameManifest): string => (isWebGame(trustedManifest(game)) ? ALLOW_WEB : "");
+
+/**
+ * Where a website game's frame loads in the WebKit apps (macOS, Linux): public/web-game.html on the app's own https host, which
+ * frames the game in turn. Their page origin is tauri://localhost and WebKit sends no referrer from it, so a game framed directly
+ * sees an empty document.referrer (Shell Shockers throws on it). Null where the game is framed directly.
+ */
+export function webGameWrapper(pageOrigin: string = globalThis.location?.origin ?? "", host: string = EMBED_ORIGIN): string | null {
+  return pageOrigin.startsWith("tauri:") && /^https?:\/\//.test(host) ? `${host}/web-game.html` : null;
+}
 
 const ROOM_URL_MAX_BYTES = 512;
 
