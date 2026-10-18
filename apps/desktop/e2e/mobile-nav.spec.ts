@@ -81,6 +81,17 @@ test.describe(`${width}x${height}`, () => {
     });
     await page.goBack();
     await expect(dialog).toHaveCount(0);
+    // the app is no longer inert once settings close: focus goes back to the button that opened them, after the X and after back
+    const opener = page.getByRole('button', { name: 'User Settings' }).first();
+    for (const how of ['button', 'history']) {
+      await opener.focus();
+      await opener.press('Enter');
+      await expect(dialog).toBeVisible();
+      if (how === 'button') await dialog.locator('.sm-side').getByRole('button', { name: 'Close' }).tap();
+      else await page.goBack();
+      await expect(dialog).toHaveCount(0);
+      await expect(opener, `focus restored after ${how}`).toBeFocused();
+    }
   });
 
   test('Server Settings and Channel Settings: Close on the list, Back to sections on a page', async ({ page }) => {
