@@ -151,7 +151,8 @@ export function guildPayload(guildId: string, viewerId: string): GatewayEvents["
   const stremio = stremioFor(guildId, viewerId);
   const spotify = spotifyFor(guildId, viewerId);
   const games = gamesFor(guildId, viewerId);
-  return { ...(games.length > 0 ? { games } : {}), ...g.guild, roles: g.guild.roles.map(r => ({ ...r })), channels, threads, members, member_count: members.length, ...(emojis.length > 0 ? { emojis } : {}), presences, stickers, soundboard_sounds, voice_states: voiceStatesFor(guildId, viewerId), stage_instances: stageInstancesFor(guildId, viewerId), ...(watch.length > 0 ? { watch_together: watch } : {}), ...(stremio.length > 0 ? { stremio } : {}), ...(spotify.length > 0 ? { spotify } : {}) };
+  // The mock has no house account owner: Spotify works in every mock guild.
+  return { ...(games.length > 0 ? { games } : {}), ...g.guild, features: [...(g.guild.features ?? []), "VOKKO_SPOTIFY"], roles: g.guild.roles.map(r => ({ ...r })), channels, threads, members, member_count: members.length, ...(emojis.length > 0 ? { emojis } : {}), presences, stickers, soundboard_sounds, voice_states: voiceStatesFor(guildId, viewerId), stage_instances: stageInstancesFor(guildId, viewerId), ...(watch.length > 0 ? { watch_together: watch } : {}), ...(stremio.length > 0 ? { stremio } : {}), ...(spotify.length > 0 ? { spotify } : {}) };
 }
 
 export function guildIdsFor(viewerId: string): string[] {
@@ -212,5 +213,6 @@ export function readyFor(viewerId: string, sessionId: string): ReadyEvent {
     user_guild_settings: guildSettingsFor(viewerId),
     media: { voice_enabled: true, voice_bitrate_ceiling: 128000, screenshare_qualities: ["720p30"], video_enabled: false },
     max_upload_bytes: MAX_UPLOAD_BYTES,
+    spotify_owner_id: null,
   };
 }

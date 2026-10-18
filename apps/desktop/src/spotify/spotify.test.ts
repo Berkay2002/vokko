@@ -4,6 +4,7 @@ import type { SpotifyState } from "../api/types";
 import type { NowPlaying } from "../desktop/spotify";
 import { playsInCall, spotifyActivity } from "../activity/spotify";
 import { voiceReducer, initialVoiceModel } from "../voice/reducer";
+import { spotifyAvailable } from "./availability";
 import { artUrl, conflictOf, shownPositionMs, statusText } from "./format";
 import { currentView, initialPanel, panelReducer } from "./panelState";
 
@@ -96,5 +97,16 @@ describe("voice store", () => {
     const ended = voiceReducer(m, { type: "spotify", channelId: "9", state: null });
     expect(ended.spotify).toEqual({});
     expect(voiceReducer(ended, { type: "spotify", channelId: "9", state: null })).toBe(ended);
+  });
+});
+
+describe("where Spotify is offered", () => {
+  it("in a guild only with the VOKKO_SPOTIFY feature, in a DM call only while the owner is in it", () => {
+    const guild = (features: string[] | undefined) => spotifyAvailable({ dm: false, features, inCall: ["1"] }, "1");
+    expect([guild(["VOKKO_SPOTIFY"]), guild(["COMMUNITY", "VOKKO_SPOTIFY"]), guild(["COMMUNITY"]), guild(undefined)]).toEqual([true, true, false, false]);
+    const dm = (inCall: string[], owner: string | null) => spotifyAvailable({ dm: true, features: undefined, inCall }, owner);
+    expect(dm(["2", "1"], "1")).toBe(true);
+    expect(dm(["2"], "1")).toBe(false); // a recipient who is not in the call does not count
+    expect(dm(["2", "1"], null)).toBe(false); // no owner configured: nowhere
   });
 });

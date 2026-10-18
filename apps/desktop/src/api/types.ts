@@ -231,7 +231,7 @@ export interface Guild {
   nsfw_level?: NsfwLevel; // Access (MANAGE_GUILD); always sent by the server. AgeRestricted gates every channel of the server
   rules_channel_id?: Snowflake | null; // Access: the rules channel (a text channel of the guild); always sent, null when unset
   join_mode?: JoinMode; // Access: how people get in (MANAGE_GUILD); absent = InviteOnly
-  features?: string[]; // Discord feature flags; "COMMUNITY" once Community is enabled (PATCH `features` toggles only that one)
+  features?: string[]; // Discord feature flags; "COMMUNITY" once Community is enabled (PATCH `features` toggles only that one); "VOKKO_SPOTIFY" where Spotify works (the house account's owner is a member)
   public_updates_channel_id?: Snowflake | null; // Community: the community updates channel (a text channel of the guild); always sent, null when unset
   default_message_notifications?: DefaultMessageNotifications; // Engagement: level for members with no per-server setting (MANAGE_GUILD); always sent, absent = AllMessages
 }
@@ -2216,6 +2216,7 @@ export interface ReadyEvent {
   media?: InstanceMediaConfig; // always sent by the server; absent = voice unavailable
   desktop_version?: string; // latest desktop release the server knows of (its downloads' latest.json); absent = not configured
   max_upload_bytes?: number; // largest attachment this server accepts (VOKKO_MAX_UPLOAD_MB); always sent by the server, absent in old fixtures = 500 MiB
+  spotify_owner_id?: Snowflake | null; // the Spotify house account's owner: Spotify works in a DM call only while they are in it; null = Spotify works nowhere
 }
 
 export enum RelationshipType {
