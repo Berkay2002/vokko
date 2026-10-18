@@ -12,11 +12,13 @@ use crate::auth::AuthUser;
 use crate::error::{ApiErr, ApiResult};
 use crate::events;
 use crate::extract::{ApiJson, parse_id};
+use crate::media;
 use crate::routes::auth::clean_text;
 use crate::routes::forums;
 use crate::routes::guilds::channel_name;
 use crate::routes::overwrites;
 use crate::routes::threads as threads_routes;
+use crate::routes::users::{ImageKind, image_path_on};
 use crate::state::AppState;
 use crate::store;
 use crate::threads;
@@ -163,6 +165,9 @@ async fn update_channel(
     if body.nsfw.is_some() && !matches!(kind, ChannelType::GuildText | ChannelType::GuildAnnouncement | ChannelType::GuildForum | ChannelType::GuildVoice) {
         return Err(ApiErr::invalid("nsfw", "Only text, announcement, forum and voice channels can be age-restricted."));
     }
+    if body.icon_attachment_id.is_some() && kind != ChannelType::GroupDm {
+        return Err(ApiErr::missing_permissions());
+    }
     if kind.is_thread() {
         return threads_routes::edit_thread(&state, user_id, access, body).await;
     }
@@ -248,6 +253,18 @@ async fn update_channel(
         && !locked.iter().any(|(row_id, guild, kind)| *row_id == parent && *guild == access.channel.guild_id && *kind == 4)
     {
         return Err(ApiErr::invalid("parent_id", "Must be a category of this guild."));
+    }
+    // Claimed like a guild icon, in the same transaction as the writes. ponytail: a replaced icon stays claimed (as guild icons do);
+    // release it like guild banners if leftover uploads ever matter.
+    if let Some(icon) = body.icon_attachment_id {
+        let path = match icon {
+            Some(upload) => {
+                media::lock_own_uploads(&mut tx, &[upload.db()], user_id).await?;
+                Some(image_path_on(&mut tx, upload.db(), user_id, ImageKind::Avatar, "icon_attachment_id", false).await?)
+            }
+            None => None,
+        };
+        sqlx::query("UPDATE channels SET icon_path = $2 WHERE id = $1").bind(id).bind(path).execute(&mut *tx).await?;
     }
     if let Some(name) = name {
         sqlx::query("UPDATE channels SET name = $2 WHERE id = $1").bind(id).bind((!name.is_empty()).then_some(name)).execute(&mut *tx).await?;
