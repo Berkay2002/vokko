@@ -110,6 +110,7 @@ pub fn channel_changes(entry: Entry, old: Option<&Channel>, new: Option<&Channel
         .change("type", old.map(|c| c.kind), new.map(|c| c.kind))
         .change("topic", old.map(|c| &c.topic), new.map(|c| &c.topic))
         .change("nsfw", old.map(|c| c.nsfw).unwrap_or(false), new.map(|c| c.nsfw).unwrap_or(false))
+        .change("rate_limit_per_user", old.and_then(|c| c.rate_limit_per_user), new.and_then(|c| c.rate_limit_per_user))
         .change("position", old.map(|c| c.position), new.map(|c| c.position))
         .change("parent_id", old.map(|c| c.parent_id), new.map(|c| c.parent_id))
 }

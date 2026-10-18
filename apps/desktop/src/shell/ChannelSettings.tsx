@@ -19,6 +19,7 @@ import { blockedByUnsaved } from "./settings/unsaved";
 import { usePermissions } from "./usePermissions";
 import { ChannelIntegrations } from "../apps/IntegrationsPage";
 import { InviteList } from "../invites/InviteList";
+import { SLOWMODE_CHOICES, slowmodeLabel } from "../chat/slowmode";
 
 type SectionId = "overview" | "forum" | "permissions" | "invites" | "integrations";
 
@@ -66,7 +67,10 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
   const [bitrateKbps, setBitrateKbps] = useState(savedBitrate);
   const [userLimit, setUserLimit] = useState(savedLimit);
   const voiceDirty = voice && (bitrateKbps !== savedBitrate || userLimit !== savedLimit);
-  const dirty = slug !== (channel.name ?? "") || (!category && nextTopic !== (channel.topic ?? null)) || voiceDirty;
+  const slowmodeSupported = channel.type === ChannelType.GuildText || voice;
+  const savedSlowmode = channel.rate_limit_per_user ?? 0;
+  const [slowmode, setSlowmode] = useState(savedSlowmode);
+  const dirty = slug !== (channel.name ?? "") || (!category && nextTopic !== (channel.topic ?? null)) || voiceDirty || slowmode !== savedSlowmode;
 
   const formatTopic = (marker: string) => {
     const box = topicRef.current;
@@ -86,6 +90,7 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
     setTopic(channel.topic ?? "");
     setBitrateKbps(savedBitrate);
     setUserLimit(savedLimit);
+    setSlowmode(savedSlowmode);
     setError(null);
   };
   const save = () => {
@@ -93,11 +98,13 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
     setBusy(true);
     setError(null);
     const voiceBody = voice ? { bitrate: bitrateKbps * 1000, user_limit: userLimit } : {};
-    request<Channel>("PATCH", `/channels/${channel.id}`, { name: slug, ...(category ? {} : { topic: nextTopic }), ...voiceBody })
+    const slowmodeBody = slowmodeSupported ? { rate_limit_per_user: slowmode } : {};
+    request<Channel>("PATCH", `/channels/${channel.id}`, { name: slug, ...(category ? {} : { topic: nextTopic }), ...voiceBody, ...slowmodeBody })
       .then(updated => {
         appStore.getState().upsertChannel(updated);
         setName(updated.name ?? slug);
         setTopic(updated.topic ?? "");
+        setSlowmode(updated.rate_limit_per_user ?? 0);
         if (voice) {
           setBitrateKbps(Math.round((updated.bitrate ?? 64000) / 1000));
           setUserLimit(updated.user_limit ?? 0);
@@ -169,9 +176,20 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
       )}
       {!category && (
         <>
-          <Field label="Slowmode" note="Not available yet.">
-            <LockedSelect label="Slowmode" value="Off" />
-          </Field>
+          {slowmodeSupported && (
+            <Field label="Slowmode" note="Members are restricted to sending one message per this interval, unless they have the Bypass Slowmode, Manage Channel or Manage Messages permission.">
+              <Select<string>
+                label="Slowmode"
+                value={String(slowmode)}
+                options={(SLOWMODE_CHOICES as readonly number[]).concat(SLOWMODE_CHOICES.some(c => c === slowmode) ? [] : [slowmode]).map(value => ({ value: String(value), label: slowmodeLabel(value) }))}
+                disabled={!editable}
+                onChange={v => {
+                  setSaved(false);
+                  setSlowmode(Number(v));
+                }}
+              />
+            </Field>
+          )}
           <Field label="Content Visibility" note="Not available yet.">
             <RadioGroup<string>
               name="Content visibility"

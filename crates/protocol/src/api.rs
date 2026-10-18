@@ -660,6 +660,9 @@ pub struct Channel {
     /// Guild voice only: 0 = unlimited, max 99.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_limit: Option<u32>,
+    /// Slowmode: seconds a member waits between messages (0 = off, max 21600). Guild text and voice channels only (always sent there).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_limit_per_user: Option<u32>,
     /// Guild voice only: the shared channel status (max 500 chars), `null` when none.
     #[serde(default, deserialize_with = "double_option", skip_serializing_if = "Option::is_none")]
     pub status: Option<Option<String>>,
@@ -2629,6 +2632,9 @@ pub struct RateLimitError {
     /// Seconds (float); also sent as the `Retry-After` header.
     pub retry_after: f64,
     pub global: bool,
+    /// 20016 when the wait is a channel's slowmode; absent for ordinary rate limits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2847,6 +2853,9 @@ pub struct UpdateChannelRequest {
     pub bitrate: Option<u32>,
     #[serde(default)]
     pub user_limit: Option<u32>,
+    /// Slowmode seconds (0..=21600); guild text and voice channels only (MANAGE_CHANNELS).
+    #[serde(default)]
+    pub rate_limit_per_user: Option<u32>,
     // ---- threads ----
     #[serde(default)]
     pub archived: Option<bool>,
@@ -3460,6 +3469,117 @@ pub struct UpdateGuildLayoutRequest {
     pub guild_folders: Option<Vec<GuildFolder>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guild_positions: Option<Vec<Snowflake>>,
+}
+
+/// `message_notifications` values of [`UserGuildSettings`] and [`ChannelOverride`] (Discord's).
+pub mod notification_level {
+    pub const ALL_MESSAGES: u8 = 0;
+    pub const ONLY_MENTIONS: u8 = 1;
+    pub const NO_MESSAGES: u8 = 2;
+    /// The guild's default (on a guild) or the parent's setting (on a channel override).
+    pub const NULL: u8 = 3;
+    /// `flags` bit (Vokko): with ONLY_MENTIONS, unread messages still show the unread dot ("@Mentions + Unreads").
+    pub const UNREADS_ONLY_MENTIONS: u32 = 1 << 11;
+}
+
+/// One channel's (or category's) notification override inside [`UserGuildSettings`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ChannelOverride {
+    pub channel_id: Snowflake,
+    #[serde(default)]
+    pub muted: bool,
+    /// `None` while muted = until turned back on.
+    #[serde(default)]
+    pub mute_config: Option<MuteConfig>,
+    /// [`notification_level`]; `NULL` = follow the parent.
+    #[serde(default = "notification_null")]
+    pub message_notifications: u8,
+    #[serde(default)]
+    pub flags: u32,
+    #[serde(default)]
+    pub collapsed: bool,
+}
+
+const fn notification_null() -> u8 {
+    notification_level::NULL
+}
+
+/// The user's notification settings for one guild, or for DMs (`guild_id` null): `GET/PATCH /users/@me/guilds/{guild.id|@me}/settings`,
+/// READY `user_guild_settings` (only entries that were ever saved) and USER_GUILD_SETTINGS_UPDATE.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct UserGuildSettings {
+    pub guild_id: Option<Snowflake>,
+    #[serde(default)]
+    pub muted: bool,
+    #[serde(default)]
+    pub mute_config: Option<MuteConfig>,
+    #[serde(default = "notification_null")]
+    pub message_notifications: u8,
+    #[serde(default)]
+    pub flags: u32,
+    #[serde(default)]
+    pub suppress_everyone: bool,
+    #[serde(default)]
+    pub suppress_roles: bool,
+    #[serde(default)]
+    pub hide_muted_channels: bool,
+    #[serde(default)]
+    pub channel_overrides: Vec<ChannelOverride>,
+}
+
+impl UserGuildSettings {
+    /// The settings of a guild nobody saved anything for.
+    pub fn new(guild_id: Option<Snowflake>) -> Self {
+        Self {
+            guild_id,
+            muted: false,
+            mute_config: None,
+            message_notifications: notification_level::NULL,
+            flags: 0,
+            suppress_everyone: false,
+            suppress_roles: false,
+            hide_muted_channels: false,
+            channel_overrides: Vec::new(),
+        }
+    }
+}
+
+/// One entry of [`UpdateUserGuildSettingsRequest::channel_overrides`]: only sent keys change.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ChannelOverridePatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub muted: Option<bool>,
+    /// `Some(None)` = explicit `null` (forever while muted).
+    #[serde(default, deserialize_with = "double_option", skip_serializing_if = "Option::is_none")]
+    pub mute_config: Option<Option<MuteConfig>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_notifications: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flags: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collapsed: Option<bool>,
+}
+
+/// Body of `PATCH /users/@me/guilds/{guild.id|@me}/settings`: only sent keys change; `channel_overrides` is keyed by channel id
+/// and merges per channel (an override back at all defaults is dropped).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct UpdateUserGuildSettingsRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub muted: Option<bool>,
+    #[serde(default, deserialize_with = "double_option", skip_serializing_if = "Option::is_none")]
+    pub mute_config: Option<Option<MuteConfig>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_notifications: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flags: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suppress_everyone: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suppress_roles: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hide_muted_channels: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_overrides: Option<std::collections::BTreeMap<Snowflake, ChannelOverridePatch>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -4368,6 +4488,9 @@ pub struct ReadyEvent {
     pub relationships: Vec<Relationship>,
     #[serde(default)]
     pub guild_layout: GuildLayout,
+    /// The user's saved notification settings, one entry per guild (or DMs) that has any; omitted when none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub user_guild_settings: Vec<UserGuildSettings>,
     pub media: InstanceMediaConfig,
     /// Latest desktop release this server knows of (`version` of the downloads' `latest.json`); absent when none is configured.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4996,6 +5119,8 @@ pub enum GatewayEvent {
     InviteCreate(Box<InviteMetadata>),
     InviteDelete(InviteDelete),
     GuildLayoutUpdate(GuildLayout),
+    /// The user's own sessions only.
+    UserGuildSettingsUpdate(Box<UserGuildSettings>),
     DesktopVersion(DesktopVersion),
     /// GUILD_JOIN_REQUEST_*: to the applicant and members with KICK_MEMBERS or MANAGE_GUILD.
     GuildJoinRequestCreate(Box<GuildJoinRequestEvent>),
@@ -5086,6 +5211,7 @@ impl GatewayEvent {
             Self::InviteCreate(_) => "INVITE_CREATE",
             Self::InviteDelete(_) => "INVITE_DELETE",
             Self::GuildLayoutUpdate(_) => "GUILD_LAYOUT_UPDATE",
+            Self::UserGuildSettingsUpdate(_) => "USER_GUILD_SETTINGS_UPDATE",
             Self::DesktopVersion(_) => "DESKTOP_VERSION",
             Self::GuildJoinRequestCreate(_) => "GUILD_JOIN_REQUEST_CREATE",
             Self::GuildJoinRequestUpdate(_) => "GUILD_JOIN_REQUEST_UPDATE",
@@ -5161,6 +5287,7 @@ impl GatewayEvent {
             Self::InviteCreate(value) => serde_json::to_value(value),
             Self::InviteDelete(value) => serde_json::to_value(value),
             Self::GuildLayoutUpdate(value) => serde_json::to_value(value),
+            Self::UserGuildSettingsUpdate(value) => serde_json::to_value(value),
             Self::DesktopVersion(value) => serde_json::to_value(value),
             Self::GuildJoinRequestCreate(value) | Self::GuildJoinRequestUpdate(value) => serde_json::to_value(value),
             Self::GuildJoinRequestDelete(value) => serde_json::to_value(value),
@@ -5779,6 +5906,16 @@ mod tests {
         assert!(empty.guild_folders.is_empty() && empty.guild_positions.is_empty());
         let update = GatewayEvent::GuildLayoutUpdate(empty);
         assert_eq!((update.name(), update.data()), ("GUILD_LAYOUT_UPDATE", json!({"guild_folders": [], "guild_positions": []})));
+        let settings: UserGuildSettings =
+            serde_json::from_value(json!({"guild_id": null, "channel_overrides": [{"channel_id": "5", "muted": true}]})).expect("defaults");
+        assert_eq!(settings.message_notifications, notification_level::NULL);
+        assert_eq!(settings.channel_overrides[0].message_notifications, notification_level::NULL);
+        let patch: UpdateUserGuildSettingsRequest =
+            serde_json::from_value(json!({"mute_config": null, "channel_overrides": {"5": {"message_notifications": 1}}})).expect("patch");
+        assert_eq!(patch.mute_config, Some(None));
+        assert_eq!(patch.channel_overrides.and_then(|map| map.get(&Snowflake(5)).and_then(|o| o.message_notifications)), Some(1));
+        let update = GatewayEvent::UserGuildSettingsUpdate(Box::new(UserGuildSettings::new(Some(Snowflake(300)))));
+        assert_eq!((update.name(), update.data()["guild_id"].clone()), ("USER_GUILD_SETTINGS_UPDATE", json!("300")));
         let desktop = GatewayEvent::DesktopVersion(DesktopVersion { version: "0.1.9".to_owned() });
         assert_eq!((desktop.name(), desktop.data()), ("DESKTOP_VERSION", json!({"version": "0.1.9"})));
     }

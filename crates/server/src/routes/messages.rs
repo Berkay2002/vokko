@@ -9,7 +9,8 @@ use serde::Deserialize;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use vokko_protocol::api::permissions::{
-    ATTACH_FILES, EMBED_LINKS, MANAGE_MESSAGES, MENTION_EVERYONE, READ_MESSAGE_HISTORY, SEND_MESSAGES, SEND_POLLS, SEND_VOICE_MESSAGES,
+    ATTACH_FILES, BYPASS_SLOWMODE, EMBED_LINKS, MANAGE_CHANNELS, MANAGE_MESSAGES, MENTION_EVERYONE, READ_MESSAGE_HISTORY, SEND_MESSAGES, SEND_POLLS,
+    SEND_VOICE_MESSAGES,
 };
 use vokko_protocol::api::{
     AckBulkRequest, AllowedMentions, AuditEntryInfo, AuditLogEvent, CreateMessageRequest, EditMessageRequest, Embed, GatewayEvent, Message, MessageAck,
@@ -646,6 +647,7 @@ async fn create_message(
     let ping_replied = body.allowed_mentions.as_ref().and_then(|allowed| allowed.replied_user).unwrap_or(true);
     let kind = if reference.is_some() { MessageType::Reply } else { MessageType::Default };
     let mentions = if forwarding { Resolved { users: Vec::new(), roles: Vec::new(), everyone: false } } else { mentions };
+    check_slowmode(&state, &access, user_id).await?;
     // Last step before the insert: it copies files, and nothing after it may fail without cleaning them up.
     let forward = match forward_source {
         Some((source_channel, source_message)) => {
@@ -672,6 +674,36 @@ async fn create_message(
         threads::add_member(&state, &access.channel, user_id).await?;
     }
     Ok(Json(view.for_viewer(user_id)))
+}
+
+/// Slowmode: one message per `rate_limit_per_user` seconds per author, unless they may bypass it (BYPASS_SLOWMODE, MANAGE_MESSAGES or
+/// MANAGE_CHANNELS, like Discord). Claiming the slot is one upsert, so two sends racing each other cannot both get through.
+async fn check_slowmode(state: &AppState, access: &ChannelAccess, user_id: i64) -> ApiResult<()> {
+    let seconds = access.channel.rate_limit_per_user;
+    if seconds <= 0 || access.permissions & (BYPASS_SLOWMODE | MANAGE_MESSAGES | MANAGE_CHANNELS) != 0 {
+        return Ok(());
+    }
+    let claimed: Option<(i64,)> = sqlx::query_as(
+        "INSERT INTO slowmode_sends (channel_id, user_id, sent_at) VALUES ($1, $2, now()) ON CONFLICT (channel_id, user_id) DO UPDATE SET sent_at = now() \
+         WHERE slowmode_sends.sent_at <= now() - make_interval(secs => $3) RETURNING channel_id",
+    )
+    .bind(access.channel.id)
+    .bind(user_id)
+    .bind(f64::from(seconds))
+    .fetch_optional(&state.db)
+    .await?;
+    if claimed.is_some() {
+        return Ok(());
+    }
+    let (left,): (f64,) = sqlx::query_as(
+        "SELECT GREATEST(EXTRACT(EPOCH FROM sent_at + make_interval(secs => $3) - now())::float8, 0) FROM slowmode_sends WHERE channel_id = $1 AND user_id = $2",
+    )
+    .bind(access.channel.id)
+    .bind(user_id)
+    .bind(f64::from(seconds))
+    .fetch_one(&state.db)
+    .await?;
+    Err(ApiErr::slowmode((left * 1000.0).ceil() / 1000.0))
 }
 
 async fn message_in_channel(state: &AppState, channel: i64, message: i64) -> ApiResult<MessageRow> {

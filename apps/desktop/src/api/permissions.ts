@@ -50,6 +50,7 @@ export const PermBit = {
   SET_VOICE_CHANNEL_STATUS: 48,
   SEND_POLLS: 49,
   PIN_MESSAGES: 51,
+  BYPASS_SLOWMODE: 52,
   /** Vokko-only: pause, seek, skip, stop and reorder Watch Together, Stremio and Spotify in a call (docs/design/bot-control.md). */
   CONTROL_MEDIA: 60,
 } as const;

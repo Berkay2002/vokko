@@ -251,7 +251,7 @@ impl RateLimiter {
 }
 
 pub fn limited_response(limited: Limited) -> Response {
-    let body = RateLimitError { message: "You are being rate limited.".to_owned(), retry_after: limited.retry_after, global: limited.global };
+    let body = RateLimitError { message: "You are being rate limited.".to_owned(), retry_after: limited.retry_after, global: limited.global, code: None };
     let mut response = (StatusCode::TOO_MANY_REQUESTS, Json(body)).into_response();
     let seconds = limited.retry_after.ceil().max(1.0) as u64;
     if let Ok(value) = HeaderValue::from_str(&seconds.to_string()) {

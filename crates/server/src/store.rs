@@ -445,11 +445,12 @@ pub struct ChannelRow {
     pub default_forum_layout: i32,
     pub created_at: OffsetDateTime,
     pub nsfw: bool,
+    pub rate_limit_per_user: i32,
 }
 
 pub const CHANNEL_COLS: &str = "id, kind, guild_id, name, topic, position, parent_id, owner_id, icon_path, last_message_id, archived, locked, invitable, \
      auto_archive_duration, default_auto_archive_duration, archive_timestamp, last_activity_at, flags, applied_tags, default_reaction_emoji_id, \
-     default_reaction_emoji_name, default_sort_order, default_forum_layout, created_at, bitrate, user_limit, voice_status, nsfw";
+     default_reaction_emoji_name, default_sort_order, default_forum_layout, created_at, bitrate, user_limit, voice_status, nsfw, rate_limit_per_user";
 
 impl ChannelRow {
     pub fn channel_type(&self) -> ChannelType {
@@ -514,6 +515,7 @@ pub async fn channels_to_api(state: &AppState, rows: Vec<ChannelRow>, viewer: Op
                 icon: (kind == ChannelType::GroupDm).then(|| row.icon_path.map(|path| state.asset_url(&path))),
                 bitrate: voice_settings.map(|(bitrate, _)| bitrate),
                 user_limit: voice_settings.map(|(_, limit)| limit),
+                rate_limit_per_user: matches!(kind, ChannelType::GuildText | ChannelType::GuildVoice).then_some(row.rate_limit_per_user as u32),
                 status: (kind == ChannelType::GuildVoice).then(|| row.voice_status.clone()),
                 thread_metadata: None,
                 member_count: None,
