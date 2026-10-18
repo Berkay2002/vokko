@@ -6,6 +6,7 @@ import { hasBit } from "../permissions";
 import { canView, channelPermsOf, guildPermsOf } from "./access";
 import { db, everyoneRole, nextId, sortedMessages, userOf, type MockAccount, type MockChannel, type MockMessage } from "./db";
 import { gifEmbeds } from "./gifs";
+import { suppressionOf } from "./guildSettings";
 import { emit } from "./socket";
 import { channelFor, messageFor } from "./views";
 
@@ -223,11 +224,19 @@ export interface NewMessage {
   forward?: MockMessage["forward"];
 }
 
-function parseMentions(content: string, referenceAuthor: string | null): { ids: string[]; everyone: boolean } {
+function parseMentions(content: string, referenceAuthor: string | null): { ids: string[]; roles: string[]; everyone: boolean } {
   const ids = new Set<string>();
   for (const match of content.matchAll(/<@!?(\d+)>/g)) if (match[1] && db.accounts.has(match[1])) ids.add(match[1]);
   if (referenceAuthor) ids.add(referenceAuthor);
-  return { ids: [...ids], everyone: /(^|\s)@(everyone|here)\b/.test(content) };
+  const roles = [...new Set([...content.matchAll(/<@&(\d+)>/g)].map(match => match[1]!))];
+  return { ids: [...ids], roles, everyone: /(^|\s)@(everyone|here)\b/.test(content) };
+}
+
+/** @everyone / @here or one of my roles, unless I switched on "Suppress @everyone and @here" / "Suppress All Role @mentions" for the guild (the server counts the same way). */
+function mentionedAnyway(channel: MockChannel, userId: string, mentions: { roles: string[]; everyone: boolean }): boolean {
+  const suppressed = suppressionOf(userId, channel.guild_id);
+  const mine = channel.guild_id ? (db.guilds.get(channel.guild_id)?.members.get(userId)?.roles ?? []) : [];
+  return (mentions.everyone && !suppressed.everyone) || (mentions.roles.some(role => mine.includes(role)) && !suppressed.roles);
 }
 
 /** Called after every appended message (threads.ts: unarchive and join on send). */
@@ -239,6 +248,9 @@ export function addMessage(input: NewMessage): MockMessage {
   const referenced = input.reference_id && !input.reference_channel_id ? sortedMessages(channel.id).find(m => m.id === input.reference_id) : undefined;
   const mentions = parseMentions(input.content, referenced?.author_id ?? null);
   if (input.allowEveryone === false) mentions.everyone = false;
+  // Like the server: only roles of this guild that are mentionable (or the author may mention everyone) count; @everyone itself is not a role.
+  const guildRoles = channel.guild_id ? (db.guilds.get(channel.guild_id)?.guild.roles ?? []) : [];
+  mentions.roles = mentions.roles.filter(id => id !== channel.guild_id && guildRoles.some(role => role.id === id && (role.mentionable || input.allowEveryone !== false)));
   const ms = input.timestamp ?? Date.now();
   const message: MockMessage = {
     id: input.id ?? nextId(ms),
@@ -251,6 +263,7 @@ export function addMessage(input: NewMessage): MockMessage {
     type: input.type ?? (referenced ? MessageType.Reply : MessageType.Default),
     mention_ids: mentions.ids,
     mention_everyone: mentions.everyone,
+    ...(mentions.roles.length ? { mention_role_ids: mentions.roles } : {}),
     attachments: input.attachments ?? [],
     reactions: [],
     pinned: false,
@@ -278,7 +291,7 @@ export function addMessage(input: NewMessage): MockMessage {
     if (userId === input.author_id) {
       state.last_message_id = message.id;
       state.mention_count = 0;
-    } else if (mentions.ids.includes(userId) || mentions.everyone || (!channel.guild_id && (message.type === MessageType.Default || message.type === MessageType.Reply))) {
+    } else if (mentions.ids.includes(userId) || mentionedAnyway(channel, userId, mentions) || (!channel.guild_id && (message.type === MessageType.Default || message.type === MessageType.Reply))) {
       // Like the server: every ordinary DM / group DM message counts as a mention of the other recipients.
       state.mention_count += 1;
     }

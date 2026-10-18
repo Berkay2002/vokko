@@ -132,7 +132,7 @@ describe("withThreadMember", () => {
   });
 
   it("a muted thread member silences decide()", () => {
-    const message = { author: { id: "9" }, mentions: [], mention_everyone: false, content: "hi", type: 0 } as never;
+    const message = { author: { id: "9" }, mentions: [], mention_roles: [], mention_everyone: false, content: "hi", type: 0 } as never;
     const run = (l: NotifyLocalState) =>
       decide({ message, meId: "10", myRoleIds: [], dm: null, scopes: ["1", "200", "100"], local: l, prefs: { desktopNotifications: true, notificationSounds: true, soundCurrentChannel: false, streamerMode: false, streamerDisableSounds: true, streamerDisableNotifications: true }, status: "online", focused: false, viewing: false, now: 1 });
     expect(run(withThreadMember(local(), "1", member())).kind).toBe("message");

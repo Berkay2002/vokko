@@ -683,6 +683,7 @@ export interface Message {
   type: MessageType;
   mentions: User[];
   mention_everyone: boolean;
+  mention_roles: Snowflake[]; // roles the server resolved from the content; what drives role pings
   attachments: Attachment[];
   embeds: Embed[]; // link unfurls (server-generated); [] when none
   reactions: Reaction[];

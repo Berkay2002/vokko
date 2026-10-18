@@ -192,7 +192,7 @@ function seedMessageShowcase(ctx: { guildId: string; parentId: string; R: string
   post(N, "this one is a **solid** setup :eyes: not financial advice 😅", day + HOUR - MIN);
   post(Bo, `@everyone market opens in ten, coffee up`, 2 * HOUR);
   post(A, `<@${R}> did you see the filing? worth a look before the bell`, 90 * MIN);
-  // A role mention of a role sam has (Admin): the row is highlighted for sam, the wire has no mention_roles so the client reads the content.
+  // A role mention of a role sam has (Admin): the row is highlighted for sam, the row highlight reads the content, the counter uses mention_roles.
   post(A, `<@&${admin}> can an admin sign off the release notes?`, 12 * MIN);
   const status = post(R, "reading it now, will post a summary", 80 * MIN);
   post(Bo, "thanks!", 40 * MIN, { reply: status.id });

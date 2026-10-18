@@ -50,6 +50,7 @@ export function messageFor(m: MockMessage, viewerId: string, depth = 0): Message
     edited_timestamp: m.edited_timestamp,
     type: m.type,
     mentions: m.mention_ids.map(userOf),
+    mention_roles: [...(m.mention_role_ids ?? [])],
     mention_everyone: m.mention_everyone,
     attachments: m.attachments.map(a => ({ ...a })),
     embeds: [...(m.embeds ?? []).map(e => ({ ...e })), ...pollEmbedsFor(m.id)],

@@ -47,6 +47,8 @@ export interface MockMessage {
   type: MessageType;
   mention_ids: string[];
   mention_everyone: boolean;
+  /** Roles the server resolved from the content (mentionable, or the author may mention everyone). */
+  mention_role_ids?: string[];
   attachments: Attachment[];
   reactions: MockReaction[];
   pinned: boolean;

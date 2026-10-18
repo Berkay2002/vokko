@@ -303,19 +303,34 @@ async fn insert_message_stored(
             mentioned.push(replied);
         }
     }
-    // Everyone whose unread-mention counter goes up.
+    // Everyone whose unread-mention counter goes up. Names and replies always count; @everyone / @here and role mentions only for
+    // members who did not switch on "Suppress @everyone and @here" / "Suppress All Role @mentions" for this guild.
     let mut notify: HashSet<i64> = mentioned.iter().copied().collect();
-    if !draft.mentions.roles.is_empty()
-        && let Some(guild_id) = channel.guild_id
-    {
-        let rows: Vec<(i64,)> = sqlx::query_as("SELECT DISTINCT user_id FROM member_roles WHERE guild_id = $1 AND role_id = ANY($2)")
+    if let Some(guild_id) = channel.guild_id {
+        if !draft.mentions.roles.is_empty() {
+            // Joined on (user_id, guild_id), the settings table's key.
+            let holders: Vec<(i64,)> = sqlx::query_as(
+                "SELECT DISTINCT mr.user_id FROM member_roles mr LEFT JOIN user_guild_settings s ON s.user_id = mr.user_id AND s.guild_id = mr.guild_id \
+                 WHERE mr.guild_id = $1 AND mr.role_id = ANY($2) AND s.settings->>'suppress_roles' IS DISTINCT FROM 'true'",
+            )
             .bind(guild_id)
             .bind(&draft.mentions.roles)
             .fetch_all(&state.db)
             .await?;
-        notify.extend(rows.into_iter().map(|(id,)| id));
+            notify.extend(holders.into_iter().map(|(id,)| id));
+        }
+        if draft.mentions.everyone {
+            let quiet: Vec<(i64,)> =
+                sqlx::query_as("SELECT user_id FROM user_guild_settings WHERE guild_id = $1 AND user_id = ANY($2) AND settings->>'suppress_everyone' = 'true'")
+                    .bind(guild_id)
+                    .bind(&viewers)
+                    .fetch_all(&state.db)
+                    .await?;
+            let quiet: HashSet<i64> = quiet.into_iter().map(|(id,)| id).collect();
+            notify.extend(viewers.iter().copied().filter(|id| !quiet.contains(id)));
+        }
     }
-    if draft.mentions.everyone || (channel.is_dm() && draft.kind != MessageType::ChannelPinnedMessage) {
+    if channel.is_dm() && draft.kind != MessageType::ChannelPinnedMessage {
         notify.extend(viewers.iter().copied());
     }
     notify.remove(&author_id);

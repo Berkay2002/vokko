@@ -711,6 +711,10 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
 
     let mention_rows: Vec<(i64, i64)> =
         sqlx::query_as("SELECT message_id, user_id FROM message_mentions WHERE message_id = ANY($1) ORDER BY user_id").bind(&ids).fetch_all(&state.db).await?;
+    let role_rows: Vec<(i64, i64)> = sqlx::query_as("SELECT message_id, role_id FROM message_role_mentions WHERE message_id = ANY($1) ORDER BY role_id")
+        .bind(&ids)
+        .fetch_all(&state.db)
+        .await?;
     let attachment_rows: Vec<AttachmentRow> = sqlx::query_as(
         "SELECT id, message_id, key, filename, content_type, size, width, height, description, duration_secs, waveform FROM attachments WHERE message_id = ANY($1) AND NOT snapshot ORDER BY id",
     )
@@ -741,6 +745,10 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
         if let Some(user) = lookup.get(&user_id) {
             mentions.entry(message_id).or_default().push(user.clone());
         }
+    }
+    let mut mention_roles: HashMap<i64, Vec<Snowflake>> = HashMap::new();
+    for (message_id, role_id) in role_rows {
+        mention_roles.entry(message_id).or_default().push(flake(role_id));
     }
     let mut attachments: HashMap<i64, Vec<Attachment>> = HashMap::new();
     for row in attachment_rows {
@@ -823,6 +831,7 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
             edited_timestamp: row.edited_at.map(iso),
             kind: kind_of(row.kind),
             mentions: mentions.remove(&row.id).unwrap_or_default(),
+            mention_roles: mention_roles.remove(&row.id).unwrap_or_default(),
             mention_everyone: row.mention_everyone,
             attachments: attachments.remove(&row.id).unwrap_or_default(),
             embeds: serde_json::from_str(&row.embeds).unwrap_or_default(),

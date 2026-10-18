@@ -397,6 +397,7 @@ async fn post_message(state: &AppState, row: &InteractionRow, request: &WebhookM
             edited_timestamp: None,
             kind,
             mentions: mentions.users.iter().filter_map(|id| mentioned.get(id).cloned()).collect(),
+            mention_roles: Vec::new(),
             mention_everyone: false,
             attachments: Vec::new(),
             embeds,

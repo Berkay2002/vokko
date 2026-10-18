@@ -31,6 +31,12 @@ export function guildSettingsFor(userId: string): UserGuildSettings[] {
     .map(([, entry]) => structuredClone(entry));
 }
 
+/** The user's two Suppress switches for a guild (both off for DMs and guilds without saved settings). */
+export function suppressionOf(userId: string, guildId: string | null): { everyone: boolean; roles: boolean } {
+  const settings = guildId ? saved.get(`${userId}:${guildId}`) : undefined;
+  return { everyone: !!settings?.suppress_everyone, roles: !!settings?.suppress_roles };
+}
+
 function target(guild: string, userId: string): string | null {
   if (guild === "@me") return null;
   if (!db.guilds.get(guild)?.members.has(userId)) fail(404, 10004, "Unknown Guild");
