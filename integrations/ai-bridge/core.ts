@@ -9,6 +9,7 @@ import { chmodSync, readFileSync, writeFileSync, renameSync, mkdirSync, existsSy
 import { join } from 'path'
 import { BRIDGE_STALE_MS, BRIDGE_STATE, HANDOFF_DIR, HEARTBEAT_MS, MODERATE_MEMBERS, ownsGuilds, safeAttName, type Access, type Message, type VokkoBot } from '../claude-channel/vokko.ts'
 import { PauseStore, RECENT_MS, decide, type Pause, type Role } from './pauses.ts'
+import { asker, runMediaTool } from '../claude-channel/media.ts'
 
 export type Totals = { costUsd?: number; inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number }
 const TOTALS = ['costUsd', 'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens'] as const
@@ -39,7 +40,12 @@ export type TurnContext = {
   scope: Scope
   pause(args: { user_id?: string; minutes: number; reason: string }): Promise<string>
   unpause(args: { user_id: string }): Promise<string>
+  /** Runs a Spotify/Stremio tool (media.ts) as the author of this turn's message; the text goes back to the model. */
+  media?(name: string, args: Record<string, unknown>): Promise<string>
 }
+
+/** Media tool calls one reply may make (the per-reply cost cap and maxTurns stop it too). */
+export const MEDIA_CALLS_PER_TURN = 12
 
 export const SCOPES = ['dm', 'server'] as const
 export type Scope = (typeof SCOPES)[number]
@@ -569,8 +575,16 @@ export class Bridge {
 
   turnContext(msg: Message, turn: { authorPaused: boolean }): TurnContext {
     const author = msg.author.id
+    let mediaCalls = 0
     return {
       scope: msg.guild_id == null ? 'dm' : 'server',
+      // Same guards as a new message: a pause (including one the model just set on the author), the monthly budget, and a cap per reply.
+      media: async (name, args) => {
+        if (turn.authorPaused || this.pauses.active(author, msg.guild_id ?? 'dm', this.now())) return 'Not available: this person is paused.'
+        if (this.backend.metered && this.month().costUsd >= this.limits.monthlyUsd) return 'Not available: the monthly budget is used up.'
+        if (++mediaCalls > MEDIA_CALLS_PER_TURN) return 'Too many music/movie requests in one reply. Answer with what you have.'
+        return runMediaTool(this.bot.cfg, asker(msg), name, args)
+      },
       pause: async ({ user_id, minutes, reason }) => {
         const target = user_id == null || user_id === '' ? author : parseUserId(user_id)
         if (!target) return `not paused: "${user_id}" is not a user id`

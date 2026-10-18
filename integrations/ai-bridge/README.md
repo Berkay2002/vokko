@@ -92,8 +92,25 @@ If it replies "Codex isn't signed in on the host", run `codex login`.
 | `VOKKO_AI_MAX_OUTPUT_TOKENS` | 1024 | |
 | `VOKKO_AI_MAX_REPLY_USD` | 0.5 | per reply |
 | `VOKKO_AI_WEB_SEARCH` | off | `1` lets Claude search the web (billed per search) |
+| `VOKKO_AI_MEDIA` | on | `off` removes the Spotify/Stremio tools (claude-api; see [Music and movies](#music-and-movies)) |
 | `VOKKO_BOT_NAME` | `Claude` / `Codex` | used in the nickname |
 | `VOKKO_CODEX_PATH` | the SDK's bundled CLI | |
+
+## Music and movies
+
+The `claude-api` bot can drive Vokko's Spotify and Stremio bots like a DJ: search, play, queue, skip, pause, seek, loop,
+shuffle, stop, and for movies and series pick the season and episode, play the first ranked stream, queue, and continue
+watching. The tools (shared with the plugin, `../claude-channel/media.ts`) are the only extra capability it has.
+
+- Every request is made as the member who asked (`X-Vokko-Acting-For: <their message id>`, set by the bridge, never by the
+  model): the server uses their voice call, their Control Media right and their own Stremio account. The call is the member's
+  voice channel in a server (looked up from them) or the DM call itself; the model never names a channel.
+- Guards are the bridge's: a paused person (including one the model just paused) and the monthly budget stop the tools, one
+  reply makes at most 12 tool calls, and the per-reply cost cap and the Agent SDK turn limit still apply.
+- Server errors reach the chat as one sentence ("You need to be in a voice call first", "Only people with Control Media can
+  do that here", "Link your Stremio account in Vokko first"), never a raw dump. The model is told to confirm before it
+  replaces what is playing or stops it.
+- `VOKKO_AI_MEDIA=off` removes the tools. The Codex backend does not have them yet.
 
 ## Owner commands
 
