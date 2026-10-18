@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Search, Star, TrendingUp, X } from 'lucide-react';
+import { ArrowLeft, Clock, Search, Star, TrendingUp, X } from 'lucide-react';
 import type { Gif, GifCategories, GifCategory, GifPage, GifProvider } from '../api/types';
 import { isFavorite } from './lists';
 import { safeMediaUrl } from './helpers';
 import { AnimatedImage, request, resolveUrl, ApiRequestError } from './shell';
-import { loadFavorites, toggleFavorite, useMedia } from './store';
+import { loadFavorites, recordGif, toggleFavorite, useMedia } from './store';
 
 type Source = { kind: 'search'; q: string } | { kind: 'trending' };
-type View = { kind: 'home' } | { kind: 'favorites' } | { kind: 'trending' } | { kind: 'category'; name: string };
+type View = { kind: 'home' } | { kind: 'favorites' } | { kind: 'recent' } | { kind: 'trending' } | { kind: 'category'; name: string };
 
 interface Listing {
   gifs: Gif[];
@@ -112,13 +112,15 @@ function Message({ title, body, action }: { title: string; body: string; action?
 }
 
 /** GIF tab of the expression picker: categories and trending, search, favourites. With provider "none" only favourites are offered. */
-export function GifPicker({ onPick, pickLabel = 'Send GIF' }: { onPick(gif: Gif): void; /** What choosing a GIF does, for screen readers ("Send GIF: title"). */ pickLabel?: string }) {
+export function GifPicker({ onPick: choose, pickLabel = 'Send GIF' }: { onPick(gif: Gif): void; /** What choosing a GIF does, for screen readers ("Send GIF: title"). */ pickLabel?: string }) {
+  const onPick = (gif: Gif) => { recordGif(gif); choose(gif); };
   const [query, setQuery] = useState('');
   const [term, setTerm] = useState('');
   const [view, setView] = useState<View>({ kind: 'home' });
   const [provider, setProvider] = useState<GifProvider | null>(null);
   const [categories, setCategories] = useState<GifCategory[] | null>(null);
   const favorites = useMedia(s => s.favorites);
+  const recent = useMedia(s => s.recentGifs);
   const scroller = useRef<HTMLDivElement>(null);
 
   useEffect(() => { void loadFavorites(); }, []);
@@ -146,11 +148,13 @@ export function GifPicker({ onPick, pickLabel = 'Send GIF' }: { onPick(gif: Gif)
   const { listing, more, retry } = useListing(source, setProvider);
   useEffect(() => { scroller.current?.scrollTo({ top: 0 }); }, [sourceKey(source), view.kind]);
 
-  const title = searching ? `Results for “${term}”` : view.kind === 'trending' ? 'Trending GIFs' : view.kind === 'category' ? view.name : view.kind === 'favorites' ? 'Favorites' : null;
-  const filteredFavorites = useMemo(() => {
+  const title = searching ? `Results for “${term}”` : view.kind === 'trending' ? 'Trending GIFs' : view.kind === 'category' ? view.name : view.kind === 'favorites' ? 'Favorites' : view.kind === 'recent' ? 'Recent' : null;
+  const matching = (list: Gif[]) => {
     const q = query.trim().toLowerCase();
-    return (favorites ?? []).filter(g => !q || g.title.toLowerCase().includes(q));
-  }, [favorites, query]);
+    return list.filter(g => !q || g.title.toLowerCase().includes(q));
+  };
+  const filteredFavorites = useMemo(() => matching(favorites ?? []), [favorites, query]); // eslint-disable-line react-hooks/exhaustive-deps
+  const filteredRecent = useMemo(() => matching(recent), [recent, query]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onScroll = () => {
     const el = scroller.current;
@@ -173,10 +177,13 @@ export function GifPicker({ onPick, pickLabel = 'Send GIF' }: { onPick(gif: Gif)
     </>;
   } else if (view.kind === 'favorites') {
     body = filteredFavorites.length > 0 ? <GifGrid gifs={filteredFavorites} favorites={favorites} onPick={onPick} pickLabel={pickLabel} /> : <Message title="No favorite GIFs yet" body="Click the star on a GIF to keep it here." />;
+  } else if (view.kind === 'recent') {
+    body = filteredRecent.length > 0 ? <GifGrid gifs={filteredRecent} favorites={favorites} onPick={onPick} pickLabel={pickLabel} /> : <Message title="No recent GIFs" body="GIFs you send will show up here." />;
   } else {
     const first = favorites?.[0];
     body = <div className="media-gif-categories">
       {favorites && favorites.length > 0 && <Tile label="Favorites" image={first?.preview_url ?? null} icon={<Star size={14} fill="currentColor" />} onClick={() => setView({ kind: 'favorites' })} />}
+      {recent.length > 0 && <Tile label="Recent" image={recent[0]?.preview_url ?? null} icon={<Clock size={14} />} onClick={() => setView({ kind: 'recent' })} />}
       <Tile label="Trending GIFs" image={categories?.[0]?.image ?? null} icon={<TrendingUp size={14} />} onClick={() => setView({ kind: 'trending' })} />
       {(categories ?? []).map(c => <Tile key={c.name} label={c.name} image={c.image} onClick={() => setView({ kind: 'category', name: c.name })} />)}
       {categories === null && <div className="media-loading" role="status">Loading categories…</div>}

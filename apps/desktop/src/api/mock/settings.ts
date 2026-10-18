@@ -59,6 +59,7 @@ export const SETTINGS_KEYS: ReadonlyMap<string, Kind> = new Map<string, Kind>([
   ["disabled_sounds", { kind: "stringList", maxItems: 32, maxChars: 32 }],
   ["keybinds", { kind: "keybinds" }],
   ["emoji_favorites", { kind: "stringList", maxItems: 100, maxChars: 64 }],
+  ["sticker_favorites", { kind: "stringList", maxItems: 100, maxChars: 32 }],
   ["streamer_mode", BOOL],
   ["streamer_auto_enable", BOOL],
   ["streamer_hide_personal", BOOL],

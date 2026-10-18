@@ -4,15 +4,19 @@
 import { create } from 'zustand';
 import type { Bookmark, BookmarksPage, Gif, Message, Reminder, Snowflake, Sticker } from '../api/types';
 import type { Gone } from './lists';
-import { addFavorite, dropNotice, isBookmarked, isFavorite, purgeBookmarks, purgeReminders, pushNotice, removeBookmark, removeFavorite, removeReminder, upsertBookmark, upsertReminder } from './lists';
+import { addFavorite, dropNotice, isBookmarked, isFavorite, MAX_FAVORITE_STICKERS, purgeBookmarks, pushRecent, toggleId, purgeReminders, pushNotice, removeBookmark, removeFavorite, removeReminder, upsertBookmark, upsertReminder } from './lists';
 import { formatDateTime } from '../chat/util';
-import { ApiRequestError, appStore, chatToast, gateway, request } from './shell';
+import { ApiRequestError, appStore, chatToast, gateway, getPrefs, request, setPref } from './shell';
 
 export interface MediaState {
   /** guild id → its stickers (READY / GUILD_CREATE / GUILD_STICKERS_UPDATE). */
   stickers: Record<Snowflake, Sticker[]>;
   /** null = not loaded yet. */
   favorites: Gif[] | null;
+  /** GIFs picked lately, newest first; kept on this device like the emoji picker's Frequently Used. */
+  recentGifs: Gif[];
+  /** Same for stickers, by id. */
+  recentStickers: string[];
   bookmarks: Bookmark[] | null;
   reminders: Reminder[] | null;
   /** Reminders that fired while the app was open, shown as notices until dismissed. */
@@ -23,7 +27,25 @@ export interface MediaState {
   forwardTarget: Message | null;
 }
 
-const initial: MediaState = { stickers: {}, favorites: null, bookmarks: null, reminders: null, notices: [], mentions: null, forwardTarget: null };
+const GIF_RECENT_KEY = 'vokko.gif.recent';
+const STICKER_RECENT_KEY = 'vokko.sticker.recent';
+
+function readList(key: string): unknown[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(key) ?? 'null') as unknown;
+    return Array.isArray(v) ? v : [];
+  } catch { return []; }
+}
+const writeList = (key: string, list: unknown[]): void => {
+  try { localStorage.setItem(key, JSON.stringify(list)); } catch { /* storage unavailable */ }
+};
+const isGif = (g: unknown): g is Gif => !!g && typeof g === 'object' && ['id', 'title', 'url', 'preview_url'].every(k => typeof (g as Record<string, unknown>)[k] === 'string')
+  && typeof (g as Gif).width === 'number' && typeof (g as Gif).height === 'number';
+
+const initial: MediaState = {
+  stickers: {}, favorites: null, recentGifs: readList(GIF_RECENT_KEY).filter(isGif), recentStickers: readList(STICKER_RECENT_KEY).filter((x): x is string => typeof x === 'string'),
+  bookmarks: null, reminders: null, notices: [], mentions: null, forwardTarget: null,
+};
 
 export const useMedia = create<MediaState>()(() => initial);
 const set = useMedia.setState;
@@ -70,6 +92,28 @@ export async function toggleFavorite(gif: Gif): Promise<void> {
     set({ favorites: before });
     chatToast(errorText(e, 'Could not update your favorite GIFs.'));
   }
+}
+
+// ---- recents and sticker favourites ----
+
+export function recordGif(gif: Gif): void {
+  const recentGifs = pushRecent(get().recentGifs, gif);
+  set({ recentGifs });
+  writeList(GIF_RECENT_KEY, recentGifs);
+}
+
+export function recordSticker(id: Snowflake): void {
+  const recentStickers = pushRecent(get().recentStickers, id);
+  set({ recentStickers });
+  writeList(STICKER_RECENT_KEY, recentStickers);
+}
+
+/** Star toggle of the sticker picker; favourites sync with the account (pref `stickerFavorites`). A full list is unchanged, so say so. */
+export function toggleFavoriteSticker(id: Snowflake): void {
+  const now = getPrefs().stickerFavorites;
+  const next = toggleId(now, id, MAX_FAVORITE_STICKERS);
+  if (next.length === now.length && !now.includes(id)) chatToast(`You can favorite up to ${MAX_FAVORITE_STICKERS} stickers.`);
+  else setPref('stickerFavorites', next);
 }
 
 // ---- bookmarks ----

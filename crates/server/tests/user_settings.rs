@@ -76,6 +76,18 @@ async fn settings_start_empty_and_patch_merges_and_bumps_the_version() {
 }
 
 #[tokio::test]
+async fn sticker_favorites_round_trip_and_stop_at_100() {
+    let app = TestApp::new().await;
+    let (token, _) = app.register("sam").await;
+    let ids = |count: usize| -> Vec<String> { (0..count).map(|i| (1000 + i).to_string()).collect() };
+    let (status, saved) = app.patch("/users/@me/settings", &token, json!({"version": 0, "settings": {"sticker_favorites": ids(100)}})).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(app.get("/users/@me/settings", &token).await.1["settings"]["sticker_favorites"], json!(ids(100)));
+    let (status, body) = app.patch("/users/@me/settings", &token, json!({"version": 1, "settings": {"sticker_favorites": ids(101)}})).await;
+    assert_eq!((status, body["code"].clone()), (StatusCode::BAD_REQUEST, json!(50035)), "{body}");
+}
+
+#[tokio::test]
 async fn unknown_keys_and_bad_values_are_rejected_without_saving_anything() {
     let app = TestApp::new().await;
     let (token, _) = app.register("sam").await;

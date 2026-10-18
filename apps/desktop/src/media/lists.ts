@@ -1,6 +1,6 @@
 // Pure list transitions for bookmarks, reminders and the due-reminder notices. Unit-tested in helpers.test.ts.
 
-import type { Bookmark, Gif, Reminder, Snowflake } from '../api/types';
+import type { Bookmark, Gif, Reminder, Snowflake, Sticker } from '../api/types';
 
 export const bookmarkKey = (channelId: Snowflake, messageId: Snowflake): string => `${channelId}:${messageId}`;
 
@@ -59,4 +59,29 @@ export function purgeBookmarks(list: readonly Bookmark[], gone: Gone): Bookmark[
 /** Same for reminders (the server drops them with the message or channel too). */
 export function purgeReminders(list: readonly Reminder[], gone: Gone): Reminder[] {
   return list.filter(r => !('messageId' in gone ? r.message_id === gone.messageId : 'channelId' in gone ? r.channel_id === gone.channelId : r.guild_id === gone.guildId));
+}
+
+// ---- recents and sticker favourites (the pickers' "Recent" and "Favorites" rows) ----
+
+export const MAX_RECENT = 24;
+/** Same cap as the server's `sticker_favorites` allow-list entry. */
+export const MAX_FAVORITE_STICKERS = 100;
+
+const idOf = (item: string | { id: string }): string => (typeof item === 'string' ? item : item.id);
+
+/** The item just used goes first (a known one moves up); the list keeps the newest `max`. */
+export function pushRecent<T extends string | { id: string }>(list: readonly T[], item: T, max = MAX_RECENT): T[] {
+  return [item, ...list.filter(x => idOf(x) !== idOf(item))].slice(0, max);
+}
+
+/** Adds an id at the end (the order they were added) or removes it; a full list is returned unchanged. */
+export function toggleId(list: readonly string[], id: string, max = MAX_FAVORITE_STICKERS): string[] {
+  return list.includes(id) ? list.filter(x => x !== id) : list.length >= max ? [...list] : [...list, id];
+}
+
+/** Stickers by id, in the order of `ids`; ids whose sticker is gone (deleted, or a server the user left) are dropped. */
+export function resolveStickers(ids: readonly string[], stickers: Readonly<Record<Snowflake, readonly Sticker[]>>): Sticker[] {
+  const byId = new Map<string, Sticker>();
+  for (const list of Object.values(stickers)) for (const s of list) byId.set(s.id, s);
+  return ids.flatMap(id => byId.get(id) ?? []);
 }
