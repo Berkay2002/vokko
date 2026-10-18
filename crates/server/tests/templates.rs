@@ -178,6 +178,41 @@ async fn is_dirty_follows_guild_changes_until_synced() {
 }
 
 #[tokio::test]
+async fn snapshot_leaves_out_channels_the_creator_cannot_view() {
+    const MANAGE_GUILD: u64 = 1 << 5;
+    let w = world().await;
+    let (_, _, staff) = furnished(&w).await;
+    let deny_everyone = json!({"type": 0, "allow": "0", "deny": VIEW_CHANNEL.to_string()});
+    let (_, vault) = w.app.post(&format!("/guilds/{}/channels", w.guild), &w.owner, json!({"name": "Vault", "type": 4})).await;
+    assert_eq!(w.app.put_json(&format!("/channels/{}/permissions/{}", id(&vault), w.guild), &w.owner, deny_everyone).await.0, StatusCode::NO_CONTENT);
+    // A manager without VIEW_CHANNEL on #staff-chat or the Vault category.
+    let manager = w.join("annie").await;
+    let (_, me) = w.app.get("/users/@me", &manager).await;
+    let (_, role) = w.app.post(&format!("/guilds/{}/roles", w.guild), &w.owner, json!({"name": "managers", "permissions": MANAGE_GUILD.to_string()})).await;
+    let assigned = w.app.patch(&format!("/guilds/{}/members/{}", w.guild, id(&me)), &w.owner, json!({"roles": [id(&role)]})).await;
+    assert_eq!(assigned.0, StatusCode::OK, "{}", assigned.1);
+
+    let base = format!("/guilds/{}/templates", w.guild);
+    let (status, template) = w.app.post(&base, &manager, json!({"name": "Club"})).await;
+    assert_eq!(status, StatusCode::OK, "{template}");
+    let (_, preview) = w.app.get(&format!("/guilds/templates/{}", code(&template)), &w.owner).await;
+    let source = &preview["serialized_source_guild"];
+    let names: Vec<&str> = source["channels"].as_array().expect("channels").iter().map(|c| c["name"].as_str().expect("name")).collect();
+    assert!(names.contains(&"general") && names.contains(&"Staff"), "visible channels and categories stay: {names:?}");
+    assert!(!names.contains(&"staff-chat") && !names.contains(&"Vault"), "hidden ones are left out: {names:?}");
+    assert!(!source.to_string().contains("staff only"));
+    assert_eq!(template["is_dirty"], false);
+
+    // Changes to hidden channels don't make the manager's template dirty, and a sync keeps them out.
+    assert_eq!(w.app.patch(&format!("/channels/{staff}"), &w.owner, json!({"topic": "still secret"})).await.0, StatusCode::OK);
+    assert_eq!(w.app.get(&base, &manager).await.1[0]["is_dirty"], false);
+    let item = format!("{base}/{}", code(&template));
+    let (status, synced) = w.app.send(axum::http::Method::PUT, &item, Some(&manager), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!synced["serialized_source_guild"].to_string().contains("staff-chat"));
+}
+
+#[tokio::test]
 async fn creating_from_a_template_remaps_every_id() {
     let w = world().await;
     let (role, category, staff) = furnished(&w).await;
