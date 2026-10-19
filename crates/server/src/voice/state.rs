@@ -552,7 +552,7 @@ async fn moved_away(state: &AppState, previous: &VoiceEntry, new_viewers: Vec<i6
         let only_old: Vec<i64> = old_viewers.into_iter().filter(|viewer| !viewers.contains(viewer)).collect();
         state.hub.send(&only_old, &GatewayEvent::VoiceStateUpdate(Box::new(previous.to_api(true))));
     }
-    release_channel(state, previous.channel_id).await;
+    release_channel(state, previous.channel_id, previous.stage).await;
 }
 
 /// Stored server mute / deafen of a member.
@@ -721,7 +721,7 @@ pub(crate) fn broadcast<'a>(state: &'a AppState, entry: &'a VoiceEntry, left: bo
         }
         state.hub.send(&viewers, &GatewayEvent::VoiceStateUpdate(Box::new(payload)));
         if left {
-            release_channel(state, entry.channel_id).await;
+            release_channel(state, entry.channel_id, entry.stage).await;
         } else {
             // A join or a (un)deafen changes who counts for media skip votes.
             super::control::refresh(state, entry.channel_id);
@@ -731,12 +731,13 @@ pub(crate) fn broadcast<'a>(state: &'a AppState, entry: &'a VoiceEntry, left: bo
 }
 
 /// The last person left `channel_id`: its voice status goes (VOICE_CHANNEL_STATUS_UPDATE with `null`), a DM call ends.
-async fn release_channel(state: &AppState, channel_id: i64) {
+/// `stage`: the channel is a stage, so a live stage instance ends once no moderator is left.
+async fn release_channel(state: &AppState, channel_id: i64, stage: bool) {
     super::stremio::user_left(state, channel_id);
     super::spotify::user_left(state, channel_id);
     super::control::refresh(state, channel_id);
     let inside: Vec<VoiceEntry> = state.voice.all().into_iter().filter(|entry| entry.channel_id == channel_id).collect();
-    if !inside.iter().any(VoiceEntry::moderator) {
+    if stage && !inside.iter().any(VoiceEntry::moderator) {
         // The last stage moderator left: the stage (if one is live) ends. Spawned, so no user lock is held while it demotes others.
         let state = state.clone();
         tokio::spawn(async move { super::stage::end_if_live(&state, channel_id).await });
