@@ -269,12 +269,24 @@ pub async fn insert_message(state: &AppState, channel: &ChannelRow, author_id: i
 }
 
 pub async fn insert_message_with(state: &AppState, channel: &ChannelRow, author_id: i64, draft: Draft, extras: Extras) -> ApiResult<MessageView> {
+    insert_message_tracked(state, channel, author_id, draft, extras, &mut false).await
+}
+
+/// [`insert_message_with`] that sets `committed` once the message is stored: an error after that (DM reopen, loading the view)
+/// comes from a message that was posted all the same.
+async fn insert_message_tracked(
+    state: &AppState,
+    channel: &ChannelRow,
+    author_id: i64,
+    draft: Draft,
+    extras: Extras,
+    committed: &mut bool,
+) -> ApiResult<MessageView> {
     // Files copied for a forward belong to the message only once it is committed: an error before that deletes them, an error
-    // after it (DM reopen, loading the view) must not, or the saved forward would point at deleted files.
+    // after it must not, or the saved forward would point at deleted files.
     let copies = draft.forward.as_ref().map(ForwardDraft::copy_ids).unwrap_or_default();
-    let mut committed = false;
-    let result = insert_message_stored(state, channel, author_id, draft, extras, &mut committed).await;
-    if result.is_err() && !committed {
+    let result = insert_message_stored(state, channel, author_id, draft, extras, committed).await;
+    if result.is_err() && !*committed {
         media::remove_files(state, &copies).await;
     }
     result
@@ -788,14 +800,18 @@ async fn create_message(
     };
     let copies = forward::CopyGuard::new(&state, forward.as_ref().map(ForwardDraft::copy_ids).unwrap_or_default());
     let draft = Draft { content, kind, reference, attachments, nonce: body.nonce, mentions, ping_replied, stickers, forward };
-    let inserted = insert_message_with(&state, &access.channel, user_id, draft, extras).await;
+    let mut committed = false;
+    let inserted = insert_message_tracked(&state, &access.channel, user_id, draft, extras, &mut committed).await;
     // insert_message_with removed the copies itself if it failed before storing them
     copies.disarm();
     let view = match inserted {
         Ok(view) => view,
         Err(error) => {
-            // A rejected insert (an unknown or already used attachment) gives the slowmode slot back.
-            release().await;
+            // A rejected insert (an unknown or already used attachment) gives the slowmode slot back; a message that was stored
+            // before the error keeps it.
+            if !committed {
+                release().await;
+            }
             return Err(error);
         }
     };

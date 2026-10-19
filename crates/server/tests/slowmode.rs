@@ -105,3 +105,29 @@ async fn a_rejected_send_does_not_use_up_the_slot() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(app.post(&path, &alice, json!({"content": "again"})).await.0, StatusCode::TOO_MANY_REQUESTS);
 }
+
+#[tokio::test]
+async fn a_send_that_fails_after_it_was_stored_keeps_the_slot() {
+    let app = TestApp::new().await;
+    let (owner, _) = app.register("owner").await;
+    let (_, general) = app.guild_with_channel(&owner).await;
+    let (alice, _) = join(&app, &owner, &general, "alice").await;
+    app.patch(&format!("/channels/{general}"), &owner, json!({"rate_limit_per_user": 60})).await;
+    let path = format!("/channels/{general}/messages");
+
+    // The row is stored under another id than the one the send then loads: the insert commits and the request fails after it.
+    sqlx::raw_sql(
+        "CREATE FUNCTION shift_message_id() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.id := NEW.id + 1; RETURN NEW; END $$; \
+         CREATE TRIGGER shift_message_id BEFORE INSERT ON messages FOR EACH ROW EXECUTE FUNCTION shift_message_id();",
+    )
+    .execute(&app.state.db)
+    .await
+    .expect("trigger");
+    let (status, body) = app.post(&path, &alice, json!({"content": "posted"})).await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+    sqlx::raw_sql("DROP TRIGGER shift_message_id ON messages").execute(&app.state.db).await.expect("drop trigger");
+    let (stored,): (i64,) = sqlx::query_as("SELECT count(*) FROM messages WHERE content = 'posted'").fetch_one(&app.state.db).await.expect("count");
+    assert_eq!(stored, 1, "the message was posted");
+    let (status, body) = app.post(&path, &alice, json!({"content": "again"})).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "a posted message keeps its slot: {body}");
+}
