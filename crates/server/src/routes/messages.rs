@@ -740,7 +740,7 @@ async fn create_message(
     let ping_replied = body.allowed_mentions.as_ref().and_then(|allowed| allowed.replied_user).unwrap_or(true);
     let kind = if reference.is_some() { MessageType::Reply } else { MessageType::Default };
     let mentions = if forwarding { Resolved { users: Vec::new(), roles: Vec::new(), everyone: false } } else { mentions };
-    // A forward copies files here: every error from now until the insert must remove them again.
+    // A forward's source is checked and read here; its files are copied only once every other check passed.
     let forward = match forward_source {
         Some((source_channel, source_message)) => {
             Some(forward::prepare(&state, user_id, source_channel, source_message, &access.channel, access.permissions).await?)
@@ -749,29 +749,13 @@ async fn create_message(
     };
     // A forward is screened on the content it copies, like the same text sent as a message.
     let (screened, plain) = match &forward {
-        Some(forward) => (forward.snapshot.message.content.clone(), forward.snapshot.message.content.clone()),
+        Some(forward) => (forward.content.content.clone(), forward.content.content.clone()),
         None => (screened, content.clone()),
     };
-    // AutoMod after the request is validated, so a blocked message ran into no other error first; its alert and timeout wait for
-    // the insert. Slowmode deliberately comes after it: a blocked message must not use up the member's slowmode slot.
-    let checked: ApiResult<_> = async {
-        let screening = crate::safety::check_send(&state, &access, user_id, &screened, &plain).await?;
-        let slot = check_slowmode(&state, &access, user_id).await?;
-        Ok((screening, slot))
-    }
-    .await;
-    let (screening, slot) = match checked {
-        Ok(checked) => checked,
-        Err(error) => {
-            media::remove_files(&state, &forward.as_ref().map(ForwardDraft::copy_ids).unwrap_or_default()).await;
-            return Err(error);
-        }
-    };
-    let draft = Draft { content, kind, reference, attachments, nonce: body.nonce, mentions, ping_replied, stickers, forward };
-    // Everything is validated: a message into a thread reopens it if it is archived (the UPDATE's `AND archived` guards it, and
-    // deciding inside the transaction closes the race with the auto-archive sweep) together with the insert.
     // Without SEND_TTS_MESSAGES the flag is dropped and the message is sent as usual (Discord does the same).
     let tts = body.tts.unwrap_or(false) && access.permissions & vokko_protocol::api::permissions::SEND_TTS_MESSAGES != 0;
+    // A message into a thread reopens it if it is archived (the UPDATE's `AND archived` guards it, and deciding inside the
+    // transaction closes the race with the auto-archive sweep) together with the insert.
     let extras = Extras {
         reopen_thread: access.channel.is_thread(),
         poll,
@@ -781,13 +765,37 @@ async fn create_message(
         components: components.as_ref().map(serde_json::to_string).transpose().map_err(|_| ApiErr::internal())?,
         ..Extras::default()
     };
-    let view = match insert_message_with(&state, &access.channel, user_id, draft, extras).await {
+    // AutoMod (after the rules and verification gates) once the request is validated, so a blocked message ran into no other error
+    // first; its alert and timeout wait for the insert. Slowmode deliberately comes after it: a blocked message must not use up the
+    // member's slowmode slot.
+    let screening = crate::safety::check_send(&state, &access, user_id, &screened, &plain).await?;
+    let slot = check_slowmode(&state, &access, user_id).await?;
+    let release = async || {
+        if let Some(sent_at) = slot {
+            release_slowmode(&state, &access, user_id, sent_at).await;
+        }
+    };
+    // Last: the file copies. The guard removes them if this request is dropped before the insert stored them.
+    let forward = match forward {
+        Some(source) => match source.copy(&state).await {
+            Ok(forward) => Some(forward),
+            Err(error) => {
+                release().await;
+                return Err(error);
+            }
+        },
+        None => None,
+    };
+    let copies = forward::CopyGuard::new(&state, forward.as_ref().map(ForwardDraft::copy_ids).unwrap_or_default());
+    let draft = Draft { content, kind, reference, attachments, nonce: body.nonce, mentions, ping_replied, stickers, forward };
+    let inserted = insert_message_with(&state, &access.channel, user_id, draft, extras).await;
+    // insert_message_with removed the copies itself if it failed before storing them
+    copies.disarm();
+    let view = match inserted {
         Ok(view) => view,
         Err(error) => {
             // A rejected insert (an unknown or already used attachment) gives the slowmode slot back.
-            if let Some(sent_at) = slot {
-                release_slowmode(&state, &access, user_id, sent_at).await;
-            }
+            release().await;
             return Err(error);
         }
     };

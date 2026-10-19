@@ -391,6 +391,34 @@ async fn automod_spam_counts_repeated_forwards() {
 }
 
 #[tokio::test]
+async fn a_forward_stopped_by_verification_or_slowmode_copies_no_files() {
+    let w = world().await;
+    let attachment = upload(&w.app, &w.owner, &w.channel, "pic.png", &png(4, 4, 0)).await;
+    let (status, source) = w.say(&w.owner, &w.channel, json!({"content": "look", "attachments": [{"id": attachment["id"]}]})).await;
+    assert_eq!(status, StatusCode::OK, "{source}");
+    // A copy of this source fails (a directory in place of its file, 500): a gate that answers first never reached the copy.
+    let original = w.app.data_dir.join("attachments").join(attachment["id"].as_str().expect("id"));
+    std::fs::remove_file(&original).expect("remove file");
+    std::fs::create_dir(&original).expect("dir in its place");
+    let files = || std::fs::read_dir(w.app.data_dir.join("attachments")).expect("attachments dir").count();
+    let before = files();
+    let reference = json!({"type": 1, "message_id": source["id"], "channel_id": w.channel});
+
+    // Medium: the member's account is not 5 minutes old
+    assert_eq!(w.app.patch(&format!("/guilds/{}", w.guild), &w.owner, json!({"verification_level": 2})).await.0, StatusCode::OK);
+    let (status, body) = w.say(&w.member, &w.channel, json!({"message_reference": reference})).await;
+    assert_eq!((status, body["code"].clone()), (StatusCode::FORBIDDEN, json!(50009)), "{body}");
+    assert_eq!(files(), before, "verification stops the forward before its files are copied");
+    assert_eq!(w.app.patch(&format!("/guilds/{}", w.guild), &w.owner, json!({"verification_level": 0})).await.0, StatusCode::OK);
+
+    assert_eq!(w.app.patch(&format!("/channels/{}", w.channel), &w.owner, json!({"rate_limit_per_user": 60})).await.0, StatusCode::OK);
+    assert_eq!(w.say(&w.member, &w.channel, json!({"content": "first"})).await.0, StatusCode::OK);
+    let (status, body) = w.say(&w.member, &w.channel, json!({"message_reference": reference})).await;
+    assert_eq!((status, body["code"].clone()), (StatusCode::TOO_MANY_REQUESTS, json!(20016)), "{body}");
+    assert_eq!(files(), before, "slowmode stops the forward before its files are copied");
+}
+
+#[tokio::test]
 async fn forwarding_to_a_dm_and_forwarding_a_forward() {
     let w = world().await;
     let (bob, friend) = w.app.register("bob").await;
