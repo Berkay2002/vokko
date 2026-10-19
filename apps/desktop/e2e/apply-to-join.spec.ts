@@ -124,6 +124,8 @@ test('an applicant applies from the invite page, sees pending, and is let in onc
 test('Join a Server with an apply-mode invite keeps the apply form open', async ({ page }) => {
   await start(page, 'bob');
   const { code } = await prepare(page, ['bob'], true);
+  // Bob left through the API, not this client, so its GUILD_DELETE opens the "no longer in" notice over the rail.
+  await page.getByRole('dialog', { name: /no longer in Sam's server/ }).getByRole('button', { name: 'Okay' }).click();
   await page.getByRole('button', { name: 'Add a Server' }).click();
   await page.getByRole('button', { name: 'Join a Server' }).click();
   await page.getByLabel(/Invite link/).fill(code);
