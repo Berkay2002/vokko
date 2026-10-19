@@ -2,6 +2,7 @@ import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo,
 import { Virtuoso, type ItemProps, type ListProps, type VirtuosoHandle } from 'react-virtuoso';
 import { CheckCheck, Loader2 } from 'lucide-react';
 import { RelationshipType, type Message, type Snowflake } from '../api/types';
+import { plainBody } from '../notify/text';
 import { announce } from '../ui/announce';
 import { useChat } from './ChatContext';
 import { foldBlocked, foldLabel, type DisplayRow, type Fold } from './blockedFold';
@@ -251,7 +252,7 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
     lastSeen.current = key;
     if (!newest || !prev || prev === key || !prev.startsWith(`${channelId}:`) || state.hasMoreAfter || newest.author.id === chat.me.id || blockedAuthor(newest)) return;
     if (compareIds(newest.id, prev.slice(channelId.length + 1)) <= 0) return; // older history loaded, or the newest was deleted
-    announce(`${chat.nameOf(newest.author, newest.member)}: ${newest.content.slice(0, 200) || 'sent an attachment'}`);
+    announce(`${chat.nameOf(newest.author, newest.member)}: ${plainBody(newest, { userName: id => chat.md.userName(id), roleName: id => chat.md.roleInfo(id)?.name ?? null, channelNameOf: id => chat.md.channelName(id) }) || 'sent an attachment'}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channelId, newest?.id]);
 
