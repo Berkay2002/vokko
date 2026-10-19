@@ -161,6 +161,9 @@ class GatewayClient {
 
   private open(): void {
     if (!this.wanted) return;
+    // A pending backoff timer (e.g. when the browser's "online" event opens early) would otherwise open a second socket.
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
     this.setRetry(this.attempts, null);
     this.setStatus(this.sessionId || this.attempts > 0 ? "reconnecting" : "connecting");
     const socket: Socket = MOCK ? new (mockBackend().MockSocket)() : (new WebSocket(GATEWAY_URL) as unknown as Socket);
