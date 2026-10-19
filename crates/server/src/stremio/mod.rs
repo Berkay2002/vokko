@@ -280,12 +280,14 @@ pub(crate) async fn load_key(state: &AppState, active: &Active<'_>, user_id: i64
 
 async fn store_key(state: &AppState, active: &Active<'_>, user_id: i64, key: &Secret) -> ApiResult<()> {
     let sealed = active.cfg.secrets_key.seal(&aad(user_id), key.expose().as_bytes()).ok_or_else(ApiErr::internal)?;
+    // linked_at from this server's clock, not the database's: the library compares it with when an item started (unix_millis).
     sqlx::query(
-        "INSERT INTO stremio_accounts (user_id, auth_key_enc) VALUES ($1, $2) \
-         ON CONFLICT (user_id) DO UPDATE SET auth_key_enc = EXCLUDED.auth_key_enc, key_version = 1, linked_at = now(), last_used_at = NULL",
+        "INSERT INTO stremio_accounts (user_id, auth_key_enc, linked_at) VALUES ($1, $2, $3) \
+         ON CONFLICT (user_id) DO UPDATE SET auth_key_enc = EXCLUDED.auth_key_enc, key_version = 1, linked_at = EXCLUDED.linked_at, last_used_at = NULL",
     )
     .bind(user_id)
     .bind(sealed)
+    .bind(OffsetDateTime::now_utc())
     .execute(&state.db)
     .await?;
     state.stremio.forget(user_id);
