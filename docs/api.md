@@ -532,7 +532,7 @@ Gateway `GUILD_JOIN_REQUEST_CREATE` / `GUILD_JOIN_REQUEST_UPDATE` `{guild_id, st
 5. `op 4 VoiceStateUpdate {guild_id, channel_id, self_mute, self_deaf, self_video}` joins, moves, leaves (`channel_id: null`) or toggles self mute/deafen (see Voice).
 6. `op 6 Resume {token, session_id, seq}` replays missed dispatches if the session buffer still has them; otherwise `op 9 InvalidSession`, and the client re-identifies.
 
-Events are delivered only to users who can see the channel/guild. Event names and payloads: `GatewayEvents` in types.ts. Presence: connected → online, last connection closed → offline; `op 3 {status, custom_status, activities?}` updates it (custom_status max 128 chars; `activities` below). The presence preference is not kept across a full disconnect.
+Events are delivered only to users who can see the channel/guild. Event names and payloads: `GatewayEvents` in types.ts. Presence: connected → online, last connection closed → offline; `op 3 {status, custom_status, activities?}` updates it (custom_status max 128 chars; `activities` below). The chosen status and custom_status are kept across disconnects; activities are cleared when the reporting connection closes (see Presence status below). Close codes and gateway limits: see Limits and abuse controls below.
 
 Poll events: `MESSAGE_POLL_VOTE_ADD` / `MESSAGE_POLL_VOTE_REMOVE` `{user_id, channel_id, message_id, guild_id, answer_id}` to the channel's viewers;
 clients apply them to `results` (and `me_voted` when `user_id` is theirs).
