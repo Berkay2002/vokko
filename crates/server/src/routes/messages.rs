@@ -754,12 +754,12 @@ async fn create_message(
     // the insert. Slowmode deliberately comes after it: a blocked message must not use up the member's slowmode slot.
     let checked: ApiResult<_> = async {
         let screening = crate::safety::check_send(&state, &access, user_id, &screened, &plain).await?;
-        check_slowmode(&state, &access, user_id).await?;
-        Ok(screening)
+        let slot = check_slowmode(&state, &access, user_id).await?;
+        Ok((screening, slot))
     }
     .await;
-    let screening = match checked {
-        Ok(screening) => screening,
+    let (screening, slot) = match checked {
+        Ok(checked) => checked,
         Err(error) => {
             media::remove_files(&state, &forward.as_ref().map(ForwardDraft::copy_ids).unwrap_or_default()).await;
             return Err(error);
@@ -779,7 +779,16 @@ async fn create_message(
         components: components.as_ref().map(serde_json::to_string).transpose().map_err(|_| ApiErr::internal())?,
         ..Extras::default()
     };
-    let view = insert_message_with(&state, &access.channel, user_id, draft, extras).await?;
+    let view = match insert_message_with(&state, &access.channel, user_id, draft, extras).await {
+        Ok(view) => view,
+        Err(error) => {
+            // A rejected insert (an unknown or already used attachment) gives the slowmode slot back.
+            if let Some(sent_at) = slot {
+                release_slowmode(&state, &access, user_id, sent_at).await;
+            }
+            return Err(error);
+        }
+    };
     screening.act(&state).await;
     if access.channel.is_thread() {
         // Talking in a thread joins it.
@@ -790,22 +799,23 @@ async fn create_message(
 
 /// Slowmode: one message per `rate_limit_per_user` seconds per author, unless they may bypass it (BYPASS_SLOWMODE, MANAGE_MESSAGES or
 /// MANAGE_CHANNELS, like Discord). Claiming the slot is one upsert, so two sends racing each other cannot both get through.
-async fn check_slowmode(state: &AppState, access: &ChannelAccess, user_id: i64) -> ApiResult<()> {
+/// Returns the claimed slot's `sent_at`, if a slot was claimed, for [`release_slowmode`].
+async fn check_slowmode(state: &AppState, access: &ChannelAccess, user_id: i64) -> ApiResult<Option<time::OffsetDateTime>> {
     let seconds = access.channel.rate_limit_per_user;
     if seconds <= 0 || access.permissions & (BYPASS_SLOWMODE | MANAGE_MESSAGES | MANAGE_CHANNELS) != 0 {
-        return Ok(());
+        return Ok(None);
     }
-    let claimed: Option<(i64,)> = sqlx::query_as(
+    let claimed: Option<(time::OffsetDateTime,)> = sqlx::query_as(
         "INSERT INTO slowmode_sends (channel_id, user_id, sent_at) VALUES ($1, $2, now()) ON CONFLICT (channel_id, user_id) DO UPDATE SET sent_at = now() \
-         WHERE slowmode_sends.sent_at <= now() - make_interval(secs => $3) RETURNING channel_id",
+         WHERE slowmode_sends.sent_at <= now() - make_interval(secs => $3) RETURNING sent_at",
     )
     .bind(access.channel.id)
     .bind(user_id)
     .bind(f64::from(seconds))
     .fetch_optional(&state.db)
     .await?;
-    if claimed.is_some() {
-        return Ok(());
+    if let Some((sent_at,)) = claimed {
+        return Ok(Some(sent_at));
     }
     let (left,): (f64,) = sqlx::query_as(
         "SELECT GREATEST(EXTRACT(EPOCH FROM sent_at + make_interval(secs => $3) - now())::float8, 0) FROM slowmode_sends WHERE channel_id = $1 AND user_id = $2",
@@ -816,6 +826,20 @@ async fn check_slowmode(state: &AppState, access: &ChannelAccess, user_id: i64) 
     .fetch_one(&state.db)
     .await?;
     Err(ApiErr::slowmode((left * 1000.0).ceil() / 1000.0))
+}
+
+/// Gives back a slot [`check_slowmode`] claimed for a send that then failed. Deleting is the same as restoring the old row, which had
+/// already expired when the slot was claimed; matching `sent_at` leaves a newer claim alone. Best effort: a failure keeps the wait.
+async fn release_slowmode(state: &AppState, access: &ChannelAccess, user_id: i64, sent_at: time::OffsetDateTime) {
+    let released = sqlx::query("DELETE FROM slowmode_sends WHERE channel_id = $1 AND user_id = $2 AND sent_at = $3")
+        .bind(access.channel.id)
+        .bind(user_id)
+        .bind(sent_at)
+        .execute(&state.db)
+        .await;
+    if let Err(error) = released {
+        tracing::warn!(%error, "could not release a slowmode slot");
+    }
 }
 
 async fn message_in_channel(state: &AppState, channel: i64, message: i64) -> ApiResult<MessageRow> {

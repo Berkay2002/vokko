@@ -88,3 +88,20 @@ async fn slowmode_limits_members_and_lets_moderators_through() {
     app.patch(&format!("/channels/{general}"), &owner, json!({"rate_limit_per_user": 0})).await;
     assert_eq!(app.post(&path, &alice, json!({"content": "five"})).await.0, StatusCode::OK);
 }
+
+#[tokio::test]
+async fn a_rejected_send_does_not_use_up_the_slot() {
+    let app = TestApp::new().await;
+    let (owner, _) = app.register("owner").await;
+    let (_, general) = app.guild_with_channel(&owner).await;
+    let (alice, _) = join(&app, &owner, &general, "alice").await;
+    app.patch(&format!("/channels/{general}"), &owner, json!({"rate_limit_per_user": 60})).await;
+    let path = format!("/channels/{general}/messages");
+
+    // An unknown attachment fails inside the insert, after the slot was claimed: the slot is given back.
+    let (status, body) = app.post(&path, &alice, json!({"content": "hi", "attachments": [{"id": "1"}]})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    let (status, body) = app.post(&path, &alice, json!({"content": "hi"})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(app.post(&path, &alice, json!({"content": "again"})).await.0, StatusCode::TOO_MANY_REQUESTS);
+}
