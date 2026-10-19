@@ -53,6 +53,10 @@ jobs:
         run: cargo test -p vokko-server -p vokko-protocol -p vokko-engine -p vokko-platform -p vokko-cli
       - name: layers
         run: cargo xtask layers
+      - name: clippy (xtask, loadtest)
+        run: cargo clippy -p xtask -p vokko-loadtest --all-targets -- -D warnings
+      - name: test (xtask, loadtest)
+        run: cargo test -p xtask -p vokko-loadtest
 
   privacy:
     # Its own job with no third-party actions, so nothing else on the runner can read the denylist secret.
@@ -83,6 +87,46 @@ jobs:
       - name: test
         working-directory: apps/desktop
         run: npm test
+
+  media-bots:
+    # Optional like tauri: livekit's webrtc-sys downloads a prebuilt libwebrtc and needs the glib headers.
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          components: clippy
+      - name: glib headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglib2.0-dev
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: clippy
+        run: cargo clippy -p spotify-bot -p stremio-bot --all-targets -- -D warnings
+      - name: test
+        run: cargo test -p spotify-bot -p stremio-bot
+
+  integrations:
+    # The echo-bot example (Node's type stripping) and the Bun integrations; none of them are npm workspaces.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - name: echo-bot
+        working-directory: examples/echo-bot
+        run: npm test
+      - name: ai-bridge
+        working-directory: integrations/ai-bridge
+        run: bun install --frozen-lockfile && bun run typecheck && bun test
+      - name: claude-channel
+        working-directory: integrations/claude-channel
+        run: bun install --frozen-lockfile && bun run typecheck && bun test
 
   audit:
     # Advisory only: new advisories appear without any change here and would block unrelated PRs, and the current
@@ -154,3 +198,5 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: build tauri crate
         run: cargo build -p vokko-desktop
+      - name: test tauri crate
+        run: cargo test -p vokko-desktop
