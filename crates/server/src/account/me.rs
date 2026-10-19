@@ -159,7 +159,7 @@ pub async fn edit_account(
     }
     if let Some(email) = &email {
         sqlx::query("UPDATE users SET pending_email = $2 WHERE id = $1").bind(user_id).bind(email).execute(&state.db).await?;
-        send_verification(&state, user_id, email).await?;
+        send_verification(&state, user_id, email, None).await?;
         state.accounts.mailer.send(
             &before.email,
             "Your Vokko email is changing",

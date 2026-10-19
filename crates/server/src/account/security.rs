@@ -30,7 +30,8 @@ const BACKUP_ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
 /// Wrong second-factor codes (or, counted apart, current passwords) per account before 429, and the window they count in.
 const MAX_FAILURES: i64 = 10;
 const FAILURE_WINDOW_SECONDS: f64 = 900.0;
-const RESET_COOLDOWN_SECONDS: f64 = 60.0;
+/// At most one reset mail a minute per account.
+const RESET_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(60);
 
 fn invalid_code() -> ApiErr {
     ApiErr::invalid("code", "Invalid two-factor code")
@@ -323,19 +324,10 @@ async fn send_reset(state: &AppState, login: &str) -> ApiResult<()> {
     let row: Option<(i64, String)> =
         sqlx::query_as("SELECT id, email FROM users WHERE (username = $1 OR email = $1) AND deleted_at IS NULL").bind(login).fetch_optional(&state.db).await?;
     if let Some((user_id, email)) = row {
-        // at most one reset mail a minute per account
-        let (recent,): (bool,) = sqlx::query_as(
-            "SELECT EXISTS (SELECT 1 FROM email_tokens WHERE user_id = $1 AND purpose = 'reset' \
-             AND expires_at > now() + make_interval(secs => $2))",
-        )
-        .bind(user_id)
-        .bind(tokens::RESET_TTL.as_secs_f64() - RESET_COOLDOWN_SECONDS)
-        .fetch_one(&state.db)
-        .await?;
-        if recent {
-            return Ok(());
-        }
-        let token = tokens::issue(state, user_id, Purpose::Reset, &email, tokens::RESET_TTL).await?;
+        let token = match tokens::issue(state, user_id, Purpose::Reset, &email, tokens::RESET_TTL, Some(RESET_COOLDOWN)).await {
+            Err(error) if error.retry_after.is_some() => return Ok(()), // the cooldown: the earlier mail stands
+            token => token?,
+        };
         let body = format!(
             "Someone asked to reset the password of your Vokko account. Open this link within an hour to choose a new one:\n\n{}\n\nIf this wasn't you, ignore this mail; your password stays the same.",
             link(state, "reset", &token)

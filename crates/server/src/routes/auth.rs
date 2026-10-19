@@ -66,7 +66,7 @@ async fn register(State(state): State<AppState>, headers: HeaderMap, ApiJson(bod
         .bind(PresenceStatus::Offline.as_str())
         .execute(&state.db)
         .await?;
-    account::send_verification(&state, id, &email).await?;
+    account::send_verification(&state, id, &email, None).await?;
     let token = account::security::issue_session(&state, id, &headers).await?;
     let user = store::user(&state, id).await?.ok_or_else(ApiErr::internal)?;
     Ok(Json(AuthResponse { token, user }))

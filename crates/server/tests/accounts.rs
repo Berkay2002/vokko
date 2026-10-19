@@ -133,7 +133,7 @@ async fn registration_mails_a_single_use_verification_link() {
     let (status, error) = app.post("/auth/verify/resend", &token, json!({})).await;
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
     assert!(error["retry_after"].as_f64().is_some_and(|wait| wait > 0.0 && wait <= 60.0));
-    sqlx::query("UPDATE email_tokens SET expires_at = expires_at - interval '61 seconds'").execute(&app.state.db).await.expect("age link");
+    sqlx::query("UPDATE email_tokens SET created_at = created_at - interval '61 seconds'").execute(&app.state.db).await.expect("age link");
 
     // a resend replaces the earlier link
     assert_eq!(app.post("/auth/verify/resend", &token, json!({})).await.0, StatusCode::NO_CONTENT);
@@ -153,6 +153,39 @@ async fn registration_mails_a_single_use_verification_link() {
     // tokens are stored hashed
     let (stored,): (i64,) = sqlx::query_as("SELECT count(*) FROM email_tokens").fetch_one(&app.state.db).await.expect("count");
     assert_eq!(stored, 0);
+}
+
+#[tokio::test]
+async fn concurrent_resends_mail_one_link() {
+    let app = TestApp::new().await;
+    let (token, _) = app.register("racer").await;
+    app.register("racer2").await;
+    sqlx::query("UPDATE email_tokens SET created_at = created_at - interval '61 seconds'").execute(&app.state.db).await.expect("age links");
+    let mails = |to: &'static str, page: &'static str| {
+        let marker = format!("/{page}#token=");
+        app.state.accounts.mailer.sent().iter().filter(|mail| mail.to == to && mail.body.contains(&marker)).count()
+    };
+    let before = mails("racer@example.test", "verify");
+    let statuses: Vec<StatusCode> = futures_util::future::join_all((0..8).map(|_| app.post("/auth/verify/resend", &token, json!({}))))
+        .await
+        .into_iter()
+        .map(|(status, _)| status)
+        .collect();
+    assert_eq!(statuses.iter().filter(|status| **status == StatusCode::NO_CONTENT).count(), 1, "{statuses:?}");
+    assert!(statuses.iter().all(|status| *status == StatusCode::NO_CONTENT || *status == StatusCode::TOO_MANY_REQUESTS), "{statuses:?}");
+    assert_eq!(mails("racer@example.test", "verify"), before + 1);
+
+    // password reset: the mails go out in the background, so wait for them to settle
+    futures_util::future::join_all((0..8).map(|_| app.send(Method::POST, "/auth/forgot", None, Some(json!({"login": "racer2"}))))).await;
+    app.mailed_token_soon("racer2@example.test", "reset").await;
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert_eq!(mails("racer2@example.test", "reset"), 1);
+    let (stored,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM email_tokens t JOIN users u ON u.id = t.user_id WHERE u.username = 'racer2' AND t.purpose = 'reset'")
+            .fetch_one(&app.state.db)
+            .await
+            .expect("count");
+    assert_eq!(stored, 1);
 }
 
 async fn login(app: &TestApp, login: &str, password: &str) -> (StatusCode, Value) {
