@@ -115,6 +115,27 @@ async function blockThreeOfFour(page: Page): Promise<void> {
   });
 }
 
+/** Waits until the open channel loads nothing and its list has not moved (scroll, height, rendered rows) for 10 frames in a row. */
+async function settled(page: Page): Promise<void> {
+  await page.evaluate(() => new Promise<void>(resolve => {
+    const w = window as unknown as { __vokko: { messageStore: { getState(id: string): { loadingOlder: boolean; loadingNewer: boolean } } } };
+    const channelId = location.pathname.split('/').pop()!;
+    let last = '';
+    let same = 0;
+    const tick = () => {
+      const el = document.querySelector('.chat-scroller')!;
+      const { loadingOlder, loadingNewer } = w.__vokko.messageStore.getState(channelId);
+      const rows = [...el.querySelectorAll('[data-index]')].map(r => `${r.getAttribute('data-index')}@${Math.round(r.getBoundingClientRect().top)}`).join();
+      const now = `${loadingOlder || loadingNewer}:${el.scrollTop}:${el.scrollHeight}:${rows}`;
+      same = now === last && !loadingOlder && !loadingNewer ? same + 1 : 0;
+      last = now;
+      if (same >= 10) resolve();
+      else requestAnimationFrame(tick);
+    };
+    tick();
+  }));
+}
+
 test('an older page that holds folded runs does not move the list (firstItemIndex follows the rows, not the messages)', async ({ page }) => {
   await page.goto('/channels/@me?as=sam&mockLatency=0&seed=big');
   await page.getByRole('link', { name: 'Big Server' }).click();
@@ -162,7 +183,6 @@ test('Show and Hide on a run of three or more keep the fold row where it is', as
   await blockThreeOfFour(page);
   const scroller = page.locator('.chat-scroller');
   await scroller.evaluate(el => { el.style.overflowAnchor = 'none'; });
-  // A wheel scroll up (a real gesture: the list stops following the bottom), then the first run of three or more that is on screen.
   await page.mouse.move(700, 450);
   // Wheel gestures up (the list stops following the bottom) until a run of three or more is on screen.
   const bigId = () => page.evaluate(() => {
@@ -172,21 +192,28 @@ test('Show and Hide on a run of three or more keep the fold row where it is', as
     });
     return el?.dataset.messageId ?? null;
   });
-  for (let i = 0; i < 30 && (i < 2 || !(await bigId())); i++) {
+  // Past the list's atBottomThreshold (160): a gesture that ends closer is undone by the list snapping back to the bottom.
+  const scrolledUp = () => scroller.evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight > 160);
+  await settled(page);
+  for (let i = 0; i < 30 && !((await scrolledUp()) && (await bigId())); i++) {
     await page.mouse.wheel(0, -250);
-    await page.waitForTimeout(250);
+    await settled(page);
   }
+  expect(await scrolledUp()).toBe(true);
   const id = (await bigId())!;
   expect(id).not.toBeNull();
   const big = list.locator(`.chat-blocked[data-message-id="${id}"]`);
-  await page.waitForTimeout(500);
   // The list row that holds the run's first message: the fold row, then the bar above the first message, then the fold row again.
-  const rowTop = () => list.locator('.chat-row', { has: page.locator(`[data-message-id="${id}"]`) }).evaluate(el => el.getBoundingClientRect().top);
-  const closedTop = await rowTop();
+  const rowTop = () => page.evaluate(id => document.querySelector(`.chat-row [data-message-id="${id}"]`)?.closest('.chat-row')?.getBoundingClientRect().top ?? null, id);
+  const closedTop = (await rowTop())!;
+  expect(closedTop).not.toBeNull();
   await big.getByRole('button', { name: /^Show/ }).evaluate(el => (el as HTMLElement).click()); // no scrolling into view, which would move the row
-  await page.waitForTimeout(500);
-  expect(Math.abs((await rowTop()) - closedTop)).toBeLessThan(4);
+  await expect(big).toHaveCount(0);
+  await expect(list.locator('.chat-blocked-bar').first()).toBeVisible();
+  await settled(page);
+  expect(Math.abs((await rowTop())! - closedTop)).toBeLessThan(4);
   await list.locator('.chat-blocked-bar').first().getByRole('button', { name: 'Hide' }).evaluate(el => (el as HTMLElement).click());
-  await page.waitForTimeout(500);
-  expect(Math.abs((await rowTop()) - closedTop)).toBeLessThan(4);
+  await expect(big).toBeVisible();
+  await settled(page);
+  expect(Math.abs((await rowTop())! - closedTop)).toBeLessThan(4);
 });
