@@ -207,6 +207,13 @@ async fn handshake(state: &AppState, writer: &mut Writer, stream: &mut Stream, l
                 };
                 let (session, generation) =
                     state.hub.open_session(user_id, session_id, hash_token(&identify.token), link, GatewayEvent::Ready(Box::new(ready)).data());
+                // A revoke during build_ready deleted the token before this session was registered, so close_token_sessions
+                // missed it. Revokers delete the row before purging, so checking after registration closes the window.
+                if !matches!(user_for_token(state, &identify.token).await, Ok(Some(id)) if id == user_id) {
+                    state.hub.remove_session(&session.id);
+                    writer.close(CLOSE_AUTH_FAILED).await;
+                    return None;
+                }
                 voice::calls::send_active(state, &session).await;
                 return Some((session, generation));
             }
