@@ -17,13 +17,13 @@
 
 | | Count |
 |---|---|
-| Fixed and committed | 29 (3 high, 9 medium, 17 low) |
-| Fix reverted after review | 1 |
+| Fixed and committed | 30 (3 high, 10 medium, 17 low) |
+| Fix reverted after review, then redone | 1 |
 | Confirmed, left alone | 12 (9 medium, 3 low) |
 | Refuted | 2 |
 | Low, unverified, not fixed | 49 |
 
-Branch diff vs `main`: 31 commits (29 fixes, plus one fix and its revert), 54 files. Executed Rust tests went from 812 (808 passed) to 822 (all passed), vitest from 2100 to 2115.
+Branch diff vs `main`: 36 commits (30 fixes, the reverted first attempt and its revert, one line-ending restore, this report and its follow-up update). Executed Rust tests went from 812 (808 passed) to 822 (all passed), vitest from 2100 to 2115.
 
 ## 2. Fixed
 
@@ -60,17 +60,18 @@ All shas confirmed present in `git log --oneline main..HEAD` and not reverted. "
 | deps-ci-tests-docs-4 | low | self-hosting.md understated what the sample Caddyfile forwards | docs/self-hosting.md:168 | 0d03fd14 | | yes |
 | deps-ci-tests-docs-5 | low | README gave the VOKKO_MAX_UPLOAD_MB default as 25 (real: 500) | README.md:49 | e114375d | | yes |
 | deps-ci-tests-docs-6 | low | docs/architecture.md described the original skeleton. Now marked historical with a current-shape section | docs/architecture.md:3 | f4d4009a | | yes |
+| uploads-outbound-ssrf-3 | medium | Embed-media proxy: a joiner taking over a cancelled download ran it without a per-address slot, so one address could fill every server-wide download slot; a cancelled starter orphaned its inflight cell. Now whoever runs a download holds its own caller's slot (a slotless takeover gives up at once), and the cell is forgotten once nobody uses it. Redone after the first attempt was reverted (section 3), reviewed twice | crates/server/src/embed_media.rs:304 | 0af6be9e, 0966587b | | |
 
 Notes on fixed items:
 - The new CI `privacy` job must be added to required checks if branch protection lists them.
 - The mock (`apps/desktop/src/api/mock`) was not updated for the password-failure 429 or the slash-command channel rules.
-- Commits b822b934 and 5aa233f6 converted `apps/desktop/src/api/types.ts` and `apps/desktop/src/chat/messageStore.ts` from CRLF to LF. That is why `git diff --stat` shows about 2.6k and 900 changed lines. The real changes are 1 and 22 lines (`git diff --ignore-cr-at-eol`). Decide whether to keep LF or restore CRLF before merge.
+- Commits b822b934 and 5aa233f6 converted `apps/desktop/src/api/types.ts` and `apps/desktop/src/chat/messageStore.ts` from CRLF to LF; a86ea1c0 restores CRLF, so the branch diff against `main` shows only the real 1 and 22 changed lines. The tree mixes LF and CRLF files (no `.gitattributes`), which invites this churn again.
 
 ## 3. Reverted fixes
 
 | Id | Title | Commit | Revert | Why |
 |---|---|---|---|---|
-| uploads-outbound-ssrf-3 | Embed-media inflight cell left behind when the starting request is cancelled, so later callers bypass the per-address download cap | 4ceb0f76 | 569cfbdb | Failed per-commit review of `crates/server/src/embed_media.rs` (`get_or_fetch`, the `Forget` drop guard, `EmbedMediaProxy::get` and `fetch`). The reviewer accepted moving cleanup into a Drop guard but rejected the commit as written. The finding is still open; redo it with a test that cancels the first request and asserts that a second caller still waits for a download slot. |
+| uploads-outbound-ssrf-3 | Embed-media inflight cell left behind when the starting request is cancelled, so later callers bypass the per-address download cap | 4ceb0f76 | 569cfbdb | Failed per-commit review of `crates/server/src/embed_media.rs` (`get_or_fetch`, the `Forget` drop guard, `EmbedMediaProxy::get` and `fetch`). The reviewer accepted moving cleanup into a Drop guard but rejected the commit as written. The reviewer showed the takeover still ran without a slot. Redone in 0af6be9e (admission inside the cell's init, `Using` drop guard); its review found a new per-URL stall (a takeover waiting 10 s for a slot while holding the cell), fixed in 0966587b. Both reviewed and passing. |
 
 ## 4. Confirmed but left alone
 
@@ -87,6 +88,7 @@ Notes on fixed items:
 | tauri-host-2 | medium | .deb installs cannot auto-update (manifest has only the AppImage) | tools/release-desktop.sh:105 | Product decision | Sign the .deb and add a `linux-x86_64-deb` manifest entry checked by `check_manifest`, or disable the updater for deb builds. |
 | client-ui-rendering-perf-4 | low | Embed videos load directly from third-party hosts, not the proxy | apps/desktop/src/chat/Embeds.tsx:163 | Product decision | Proxy video through embed_media with size and range caps, or show a proxied thumbnail with click-to-open. |
 | tauri-host-5 | low | One global popup budget shared by link clicks, OAuth and framed games | apps/desktop/src-tauri/src/popups.rs:25 | Product decision | Unthrottled command for app-initiated opens; throttle only untrusted frames; toast when suppressed. |
+| (follow-up) | medium | Slash commands and component clicks skip the rules gate and verification level that message sends enforce (`crate::safety::check_send`), and options are not AutoMod-screened or slowmode-limited | crates/server/src/routes/interactions.rs:224 | Product decision: docs/api.md (Rules gate) says interactions are not gated on purpose, and slowmode is documented as not applying | If reversed: call `check_rules_accepted` and `check_verification` in `invoke` for guild channels, decide whether autocomplete and component clicks are gated too, update docs/api.md. |
 | deps-ci-tests-docs-3 | low | CI never lints or tests tools/*, the Tauri crate, xtask, integrations or echo-bot | .github/workflows/ci.yml:51 | Product decision (CI cost) | Add jobs for xtask and loadtest, the bots, `cargo test -p vokko-desktop`, and echo-bot/integrations; align README/CONTRIBUTING with CI. |
 
 The fixer skipped no confirmed fix. Partial-scope items noted by fixers:
@@ -166,24 +168,23 @@ The fixer skipped no confirmed fix. Partial-scope items noted by fixers:
 | `cargo xtask privacy` | pass | pass |
 | UI build (`npm run build`) | pass (chunk-size warning) | pass (chunk-size warning) |
 | vitest | pass: 225 files, 2100 tests | pass: 228 files, 2115 tests |
-| Playwright e2e | fail: 812 passed, 3 failed, 70 skipped | fail: 813 passed, 2 failed, 70 skipped |
+| Playwright e2e | fail: 812 passed, 3 failed, 70 skipped | fail: 813 passed, 2 failed, 70 skipped (both failures also fail on `main`, see below) |
 | Tauri crate build | pass | pass |
 
 e2e detail:
 - **Pre-existing, still failing:** `e2e/apply-to-join.spec.ts:124` ("keeps the apply form open") times out waiting for the Add a Server button. It reproduces when run alone.
 - **Baseline only, passing on final:** `e2e/messages.spec.ts:129` (toolbar after wheel scroll) and `e2e/block-confirm.spec.ts:118` (older page with folded runs; offset 64). The baseline e2e partly overlapped a cargo test run, so these may have been load-induced.
-- **New on final:** `e2e/block-confirm.spec.ts:156` ("Show and Hide on a run of three or more keep the fold row where it is") times out at line 184 waiting for the run's first message row. It reproduces when run alone and was not in the baseline failure list, so treat it as a possible regression on this branch. Look first at the commits touching chat rendering: 5aa233f6 (messageStore reset, 22 real lines) and 41d92575 (GIF gating in MessageItem).
+- **Load flake, not a regression:** `e2e/block-confirm.spec.ts:156` ("Show and Hide on a run of three or more keep the fold row where it is") failed in the final full run. A follow-up compared `main` and this branch in the same fresh worktree: 5/5 and 16/16 passes on both at 1 and 8 workers, and 2/48 failures on both at 16 workers, with the same timeout in `rowTop()`. The test relies on fixed waits and pixel positions in the virtualized list. Note: a Playwright baseline in a worktree needs its own `npm ci`; a junctioned `node_modules` makes Vite refuse the font files and shifts the layout.
 - **Stremio Rust tests:** they fail under CPU load on both baseline and final and pass on an idle machine. Fix fc45d13c changed the same code path, and its idle run is green. The 30 s `common::WAIT` appears to be too tight under load.
 
 ## 8. Recommended next steps
 
-1. **Bisect the new e2e failure.** Run `e2e/block-confirm.spec.ts:156` against 5aa233f6 and 41d92575, and fix it before merging this branch.
-2. **Settle line endings.** Normalize `apps/desktop/src/api/types.ts` and `apps/desktop/src/chat/messageStore.ts` back to CRLF (or add `.gitattributes`) so the merge diff shows only real changes.
-3. **Redo uploads-outbound-ssrf-3** (embed-media inflight cleanup) with a cancellation test.
-4. **Fix the open availability findings:** server-auth-accounts-2 (bounded argon2 queue) and server-auth-accounts-3 (verification mail cooldown). Both are small and directly abusable on open-registration instances.
-5. **Fix server-guild-permissions-1** (AutoMod bypass through forwards) and voice-livekit-games-1 (reconnect drops voice state).
-6. **Make the product decisions** on gateway-realtime-6 (session cap), storage-sql-migrations-4 (offsite backup deletion), tauri-host-2 (.deb updates) and client-ui-rendering-perf-4 (embed video proxying).
-7. **Close test and CI gaps.** Mirror the new password lockout and slash-command rules in the desktop mock. Add the CI `privacy` job to required checks. Add dependency audit jobs (deps-ci-tests-docs-11) and CI coverage for tools and the Tauri crate (deps-ci-tests-docs-3).
-8. **Verify on Unix:** compile and smoke-test the SIGTERM handling (2f7b7824) and the native-voice output switch (751549fb) on Linux, ideally with `docker compose stop` timing and the `live_room` harness.
-9. **Deflake** `e2e/apply-to-join.spec.ts:124` and raise or scale `common::WAIT` for the stremio tests.
-10. **Work through the section 6 list.** Cheap docs fixes first (voice-livekit-games-3, deps-ci-tests-docs-7, -13, deploy-config-secrets-7), then server-auth-accounts-6 and uploads-outbound-ssrf-6.
+1. **Settle line endings.** Add a `.gitattributes` (for example `* text=auto eol=lf`) and normalize in one dedicated commit, so editors and agents stop flipping files.
+2. **Decide on interaction gating** (section 4, follow-up row): keep the documented exemption or gate slash commands like sends.
+3. **Fix the open availability findings:** server-auth-accounts-2 (bounded argon2 queue) and server-auth-accounts-3 (verification mail cooldown). Both are small and directly abusable on open-registration instances.
+4. **Fix server-guild-permissions-1** (AutoMod bypass through forwards) and voice-livekit-games-1 (reconnect drops voice state).
+5. **Make the product decisions** on gateway-realtime-6 (session cap), storage-sql-migrations-4 (offsite backup deletion), tauri-host-2 (.deb updates) and client-ui-rendering-perf-4 (embed video proxying).
+6. **Close test and CI gaps.** Mirror the new password lockout and slash-command rules in the desktop mock. Add the CI `privacy` job to required checks. Add dependency audit jobs (deps-ci-tests-docs-11) and CI coverage for tools and the Tauri crate (deps-ci-tests-docs-3).
+7. **Verify on Unix:** compile and smoke-test the SIGTERM handling (2f7b7824) and the native-voice output switch (751549fb) on Linux, ideally with `docker compose stop` timing and the `live_room` harness.
+8. **Deflake** `e2e/apply-to-join.spec.ts:124` and `e2e/block-confirm.spec.ts:156` and raise or scale `common::WAIT` for the stremio tests.
+9. **Work through the section 6 list.** Cheap docs fixes first (voice-livekit-games-3, deps-ci-tests-docs-7, -13, deploy-config-secrets-7), then server-auth-accounts-6 and uploads-outbound-ssrf-6.
