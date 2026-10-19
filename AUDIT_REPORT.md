@@ -179,12 +179,138 @@ e2e detail:
 
 ## 8. Recommended next steps
 
-1. **Settle line endings.** Add a `.gitattributes` (for example `* text=auto eol=lf`) and normalize in one dedicated commit, so editors and agents stop flipping files.
-2. **Decide on interaction gating** (section 4, follow-up row): keep the documented exemption or gate slash commands like sends.
-3. **Fix the open availability findings:** server-auth-accounts-2 (bounded argon2 queue) and server-auth-accounts-3 (verification mail cooldown). Both are small and directly abusable on open-registration instances.
-4. **Fix server-guild-permissions-1** (AutoMod bypass through forwards) and voice-livekit-games-1 (reconnect drops voice state).
-5. **Make the product decisions** on gateway-realtime-6 (session cap), storage-sql-migrations-4 (offsite backup deletion), tauri-host-2 (.deb updates) and client-ui-rendering-perf-4 (embed video proxying).
-6. **Close test and CI gaps.** Mirror the new password lockout and slash-command rules in the desktop mock. Add the CI `privacy` job to required checks. Add dependency audit jobs (deps-ci-tests-docs-11) and CI coverage for tools and the Tauri crate (deps-ci-tests-docs-3).
-7. **Verify on Unix:** compile and smoke-test the SIGTERM handling (2f7b7824) and the native-voice output switch (751549fb) on Linux, ideally with `docker compose stop` timing and the `live_room` harness.
-8. **Deflake** `e2e/apply-to-join.spec.ts:124` and `e2e/block-confirm.spec.ts:156` and raise or scale `common::WAIT` for the stremio tests.
-9. **Work through the section 6 list.** Cheap docs fixes first (voice-livekit-games-3, deps-ci-tests-docs-7, -13, deploy-config-secrets-7), then server-auth-accounts-6 and uploads-outbound-ssrf-6.
+1. **Done** (c02748e8, section 9). **Settle line endings.** Add a `.gitattributes` (for example `* text=auto eol=lf`) and normalize in one dedicated commit, so editors and agents stop flipping files.
+2. **Done**: exemption kept and documented (section 9). **Decide on interaction gating** (section 4, follow-up row): keep the documented exemption or gate slash commands like sends.
+3. **Done** (section 9). **Fix the open availability findings:** server-auth-accounts-2 (bounded argon2 queue) and server-auth-accounts-3 (verification mail cooldown). Both are small and directly abusable on open-registration instances.
+4. **Done** (section 9). **Fix server-guild-permissions-1** (AutoMod bypass through forwards) and voice-livekit-games-1 (reconnect drops voice state).
+5. **Partly done**: three decided and fixed, client-ui-rendering-perf-4 still open (section 9). **Make the product decisions** on gateway-realtime-6 (session cap), storage-sql-migrations-4 (offsite backup deletion), tauri-host-2 (.deb updates) and client-ui-rendering-perf-4 (embed video proxying).
+6. **Partly done**: mock, audit job (advisory) and CI coverage landed; adding the privacy job to required checks is a repository setting, still open (section 9). **Close test and CI gaps.** Mirror the new password lockout and slash-command rules in the desktop mock. Add the CI `privacy` job to required checks. Add dependency audit jobs (deps-ci-tests-docs-11) and CI coverage for tools and the Tauri crate (deps-ci-tests-docs-3).
+7. **Open**: the check did not finish (section 9). **Verify on Unix:** compile and smoke-test the SIGTERM handling (2f7b7824) and the native-voice output switch (751549fb) on Linux, ideally with `docker compose stop` timing and the `live_room` harness.
+8. **Done**, stremio root cause was a clock mismatch, not WAIT; other flaky e2e tests remain (section 9). **Deflake** `e2e/apply-to-join.spec.ts:124` and `e2e/block-confirm.spec.ts:156` and raise or scale `common::WAIT` for the stremio tests.
+9. **Partly done**: 38 fixed, 3 refuted, 8 left (section 9). **Work through the section 6 list.** Cheap docs fixes first (voice-livekit-games-3, deps-ci-tests-docs-7, -13, deploy-config-secrets-7), then server-auth-accounts-6 and uploads-outbound-ssrf-6.
+
+## 9. Follow-up round
+
+Branch `audit-followups` (on top of `main`, which holds the first round): 56 commits, all listed by `git log --oneline main..HEAD`. One sets line endings (c02748e8, `.gitattributes` keeps text files LF); the rest fix the items below, one commit per item plus review follow-ups. Nothing was reverted.
+
+### Owner decisions
+
+- **Interactions** keep their documented exemption from the rules gate, verification level, slowmode and AutoMod (section 4, follow-up row). docs/api.md now says so precisely.
+- **Gateway sessions** are capped at 16 per user (64 per bot); a detached session goes first, otherwise the oldest live one is closed with 4000.
+- **Offsite backups** keep `rsync --delete`, behind a guard that refuses to sync when local sets look lost.
+- **.deb installs** skip the in-app updater and tell the user to update through the package manager.
+- **Not decided, still open:** embed video proxying (client-ui-rendering-perf-4) and the popup budget (tauri-host-5).
+
+### Fixed
+
+"API" = public behavior or API change; "Docs" = docs updated in the same commits. Shas checked against `git log main..HEAD`.
+
+| Id | Title | Commits | API | Docs |
+|---|---|---|---|---|
+| server-auth-accounts-2 | Unbounded argon2 semaphore queue (now a 2 s wait, then 429 busy with Retry-After; hashing before side effects) | 7b26740d, b3da6ab8 | | |
+| server-auth-accounts-3 | No per-account cooldown on verification mail (now 60 s, 429 with Retry-After) | b8836742 | yes | yes |
+| server-guild-permissions-1 | Forwards bypass AutoMod keyword, regex and spam rules | 48c1f3cb, 6ad5ffe1 | yes | yes |
+| voice-livekit-games-1 | `participant_left` for a superseded participant removes the live voice state | 111a3974 | | yes |
+| gateway-realtime-6 | No cap on concurrent gateway sessions per user | 6a6e9214 | yes | yes |
+| storage-sql-migrations-4 | Offsite `rsync --delete` mirrors a local loss and wipes offsite history | 2ac56a67 | yes | yes |
+| tauri-host-2 | .deb installs cannot auto-update | 4d4454c9 | yes | yes |
+| (follow-up) interactions | docs/api.md: interactions skip the rules gate, verification level, slowmode and AutoMod | 1d404f0d | | yes |
+| mock parity | Desktop mock mirrors the password lockout and the slash-command channel rules | 98626bbc | | |
+| deps-ci-tests-docs-11, deps-ci-tests-docs-3 | No dependency audit gate; CI skipped tools, the Tauri crate, xtask, integrations and echo-bot (the audit and media-bots jobs are advisory) | c0b6f912, cd957cf8, 1ce087b7 | | yes |
+| deflake | `e2e/apply-to-join.spec.ts:124` (test bug), `e2e/block-confirm.spec.ts:156` (load flake), stremio tests (database vs server clock in `linked_at`, not `common::WAIT`) | d4cbe6c8, e3999db0, c0406fcd | | |
+| server-guild-permissions-2 | create_channel accepts a parent category the creator cannot view | f87d3b8f | yes | |
+| server-guild-permissions-4 | Role reorder and delete not transactional | cbba04d7 | | |
+| uploads-outbound-ssrf-5 | Sticker cap checked without a lock | a33ff2a7 | | |
+| uploads-outbound-ssrf-6 | SSRF guard misses 64:ff9b:1::/48 and ::ffff:0:0/96 | 67268ec7 | | yes |
+| voice-livekit-games-2 | room_finished ignores which room instance finished | 078558e6 | | yes |
+| voice-livekit-games-3 | docs/api.md says 15 s DM call connect timeout (code: 30 s) | d2479dc5 | | yes |
+| voice-livekit-games-4 | release_channel runs a stage-end query on every leave | 3c9a6d0d | | |
+| voice-livekit-games-5 | Stage stays live when the last moderator loses permissions | 4ca30f33 | | yes |
+| client-api-types-2 | GUILD_MEMBER_UPDATE keeps stale mute/deaf/flags | c98efae7 | | |
+| client-api-types-3 | Client moderation checks differ from server (timeout clamp, role tie-break) | 2cc66443 | | |
+| apps-bots-integrations-4 | echo-bot entry check never matches on Windows | a7814c53 | | |
+| apps-bots-integrations-6 | Autocomplete choices validated only by count | bba6b6b9 | yes | yes |
+| server-messages-threads-3 | Rejected send still starts slowmode | 9b5a06bd | | |
+| server-messages-threads-6 | Poll answer custom emoji only shape-checked (row in section 2, whose Commit cell predates the sha) | 42892c41 | yes | yes |
+| tauri-host-6 | Upload Preview does nothing in the desktop app (now web-only) | 38361418 | | |
+| tauri-host-7 | Prefs, window state and crash marker written non-atomically | 8158a5bd | | |
+| tauri-host-9 | Stale app_dirs and unsafe_code comments | 31046905 | | yes |
+| deploy-config-secrets-4 | .dockerignore omits `.private/` and other ignored local files | 4becc266 | | |
+| deploy-config-secrets-6 | Privacy guard skips binary files (now scans binaries and file names; a file-name hit prints its position, not the path) | bf0b42af, ccc4630f | | yes |
+| deploy-config-secrets-7 | self-hosting-free.md misstates S3 disk use and voice timeout | 0204d8d4 | | yes |
+| client-ui-rendering-perf-6 | inviteCache caches failures forever (now only a 404) | dc12abaf | | |
+| client-ui-rendering-perf-7 | Screen-reader announcement reads spoilers | c0ed1300 | | |
+| storage-sql-migrations-3 | Backups include the embed-media cache | c84ca662 | | yes |
+| storage-sql-migrations-6 | restore.sh URL mode drops the DB under a running server (documented) | df1b83c7 | | yes |
+| storage-sql-migrations-8 | S3 copy fallback buffers the whole object (now spooled to a temp file) | 70691cfe | | |
+| storage-sql-migrations-10 | backup.sh passes the DB URL with password on the command line (documented: use a passfile or PGPASSWORD) | f494d942 | | yes |
+| server-auth-accounts-5 | Email validation accepts display-name forms | 25e3d9d4 | yes | |
+| server-auth-accounts-6 | Password reset does not invalidate MFA login tickets | 84121913 | | |
+| server-auth-accounts-7 | MFA lockout 429 has no Retry-After (also the password lockout) | 7762d98e | yes | yes |
+| gateway-realtime-8 | Duplicate socket when `online` fires during backoff | aed5562f | | |
+| gateway-realtime-9 | Client RESUME_WINDOW check is dead code; server ignores session_ttl on resume | 0dcfd5d2 | yes | yes |
+| gateway-realtime-10 | Handshake timeout during send_active leaves an orphan session | 1b8d713a | | |
+| deps-ci-tests-docs-7 | api.md says embed-media proxy has no cache | c5c2d14f | | yes |
+| deps-ci-tests-docs-8 | Dockerfile HEALTHCHECK only TCP-connects | 7b8900ee | | yes |
+| deps-ci-tests-docs-9 | Stale pnpm-lock.yaml tracked beside package-lock.json | 25d5153d | | |
+| deps-ci-tests-docs-10 | Docs cite commit hashes absent from public history | fbd85788 | | yes |
+| deps-ci-tests-docs-13 | VOKKO_SECRETS_KEY missing from the self-hosting reference | 17261810 | | yes |
+
+Scope limits the fixers noted:
+- **server-auth-accounts-2:** no regression test for the reset/edit ordering (holding all 4 hash slots would starve parallel tests); the `hash_slot` unit test covers the 429.
+- **server-auth-accounts-3:** only the resend route is limited; the email-change mail (which needs the current password) is not, and there is no daily cap.
+- **server-guild-permissions-1:** `forward::prepare` now runs first, so a forward of an unreadable source gets 404 10008 before the 150010, 50009, AutoMod and slowmode checks.
+- **voice-livekit-games-1:** an out-of-order join webhook can record the older sid again; reconciliation does not record sids.
+- **server-guild-permissions-4:** no new test; re-validation against the locked state is server-guild-permissions-3.
+- **client-ui-rendering-perf-6:** successful invite lookups are still cached forever.
+- **deps-ci-tests-docs-9:** no `packageManager` field (Corepack would pin one npm version for everyone).
+
+### Not fixed or reverted
+
+None. Every item handed to a fixer landed. Three (server-auth-accounts-2, server-guild-permissions-1, deploy-config-secrets-6) needed a second commit after review.
+
+### Low findings refuted in triage
+
+| Id | Reason |
+|---|---|
+| client-api-types-4 | The only caller passing a signal (`apps/desktop/src/chat/draftStore.ts`) creates the AbortController in the same synchronous step as the upload, so the signal cannot be aborted before send; no caller is affected by the 429 part either. |
+| tauri-host-8 | The code is as described, but it runs only on the owner's single-user release machines; no other local user or untrusted code can reach the fixed path or the exported key. |
+| storage-sql-migrations-9 | Needs the wall clock to step back by more than the server's downtime between the last issued id and the restart; not a realistic failure. |
+
+### Unix verification
+
+Not finished. The check on a macOS machine was still building the server when this report was written, so the SIGTERM handling (2f7b7824) and the native-voice output switch (751549fb, Linux only) remain unverified on Unix.
+
+### Suite results (follow-up branch, Windows)
+
+| Step | Result |
+|---|---|
+| `cargo fmt --check` | pass |
+| clippy (server, protocol, engine, platform, cli; `-D warnings`) | pass |
+| Rust tests (same crates, test database) | pass: 65 binaries, 840 passed, 0 failed, 2 ignored |
+| `cargo xtask layers` | pass |
+| `cargo xtask privacy` | pass (18 patterns, contents and file names) |
+| UI build (`npm run build`) | pass |
+| vitest | pass: 231 files, 2122 tests |
+| Playwright e2e | fail: 814 passed, 1 failed, 70 skipped. `e2e/voice-ui.spec.ts:172` timed out in `openGuild` late in the 31.5 min single-worker run; the spec alone passes (14 passed, 2 skipped), so it looks like a timing flake |
+| Tauri crate build | pass |
+| clippy and tests: xtask, vokko-loadtest | pass (16 tests) |
+| `cargo test -p vokko-desktop` | pass (68 tests) |
+| clippy: spotify-bot, stremio-bot | pass |
+| tests: spotify-bot, stremio-bot | spotify-bot pass (3); stremio-bot does not link on Windows (LNK2038, C runtime mismatch in livekit's prebuilt libwebrtc). CI runs this job on Linux, advisory |
+| echo-bot `npm test` | pass (4) |
+| integrations/ai-bridge (bun install, typecheck, test) | pass (123) |
+| integrations/claude-channel (bun install, typecheck, test) | pass (61, 4 skipped) |
+| `cargo audit` (advisory job) | fail: 19 vulnerabilities (rustls, rustls-webpki, zip, quick-xml, rsa, glib and others, mostly in the Tauri and bot trees) |
+| `npm audit --omit=dev --audit-level=high` (advisory job) | fail: 10 (5 high, from boardgame.io's server-side koa/socket.io/ws dependencies; the only fix is a breaking downgrade) |
+
+The Ubuntu-only CI setup (apt webkit/glib, `npx playwright install --with-deps`) and the CI privacy secret could not be reproduced here.
+
+### Still open
+
+- **Section 4:** gateway-realtime-4 (events lost while READY builds), storage-sql-migrations-2 (mentions index and query), and the undecided client-ui-rendering-perf-4 and tauri-host-5.
+- **Section 6, left by class:** risky: server-guild-permissions-3, storage-sql-migrations-7. Product decision: apps-bots-integrations-5, server-messages-threads-4, server-messages-threads-5, server-auth-accounts-8, deps-ci-tests-docs-12, deps-ci-tests-docs-14.
+- **Unix verification** (above).
+- **Repository settings:** add the `privacy` job and the new blocking jobs to required checks if branch protection lists them.
+- **Advisories:** the cargo and npm audit findings above; the media-bots job has not run on Linux CI yet.
+- **Flaky e2e:** `e2e/block-confirm.spec.ts:139` ("an older page that holds folded runs does not move the list"; about 6/48 at 16 workers on the original code too, likely an app bug in folded-row handling) and `e2e/voice-ui.spec.ts:172`.
