@@ -311,6 +311,22 @@ async fn allowed_mentions_limit_who_gets_pinged() {
 }
 
 #[tokio::test]
+async fn edits_honour_allowed_mentions() {
+    let s = setup().await;
+    let base = format!("/channels/{}/messages", s.channel);
+    let content = format!("@everyone <@{}>", s.member_id);
+    let (_, quiet) = s.app.post(&base, &s.owner, json!({"content": content, "allowed_mentions": {"parse": []}})).await;
+    let mid = quiet["id"].as_str().expect("id");
+    let (status, edited) = s.app.patch(&format!("{base}/{mid}"), &s.owner, json!({"content": format!("{content}!"), "allowed_mentions": {"parse": []}})).await;
+    assert_eq!(status, StatusCode::OK, "{edited}");
+    assert_eq!(edited["mention_everyone"], false);
+    assert_eq!(edited["mentions"], json!([]));
+    // omitted parses everything, like a send
+    let (_, loud) = s.app.patch(&format!("{base}/{mid}"), &s.owner, json!({"content": content})).await;
+    assert_eq!(loud["mention_everyone"], true);
+}
+
+#[tokio::test]
 async fn bulk_ack_marks_channels_read() {
     let s = setup().await;
     let base = format!("/channels/{}/messages", s.channel);

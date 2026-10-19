@@ -901,7 +901,11 @@ async fn edit_message(
         // Embeds whose URL is gone from the content disappear at once; new URLs are unfurled in the background.
         let kept: Vec<Embed> =
             if suppressed { Vec::new() } else { current.into_iter().filter(|embed| embed.url.as_ref().is_some_and(|url| urls.contains(url))).collect() };
-        let mentions = if content_changed { Some(resolve_mentions(&state, &access, parse_mentions(&content)).await?) } else { None };
+        let mentions = if content_changed {
+            Some(apply_allowed(resolve_mentions(&state, &access, parse_mentions(&content)).await?, body.allowed_mentions.as_ref()))
+        } else {
+            None
+        };
         let mut tx = state.db.begin().await?;
         sqlx::query("UPDATE messages SET content = $2, edited_at = $3, mention_everyone = $4, flags = $5, embeds = $6::jsonb, components = COALESCE($7::jsonb, components) WHERE id = $1")
             .bind(mid)

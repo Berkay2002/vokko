@@ -1495,6 +1495,7 @@ export interface EditMessageRequest {
   content?: string;
   flags?: number; // 1 << 2 SUPPRESS_EMBEDS
   attachments?: { id: Snowflake }[]; // attachments to keep; omitted = unchanged; can only remove, not add
+  allowed_mentions?: AllowedMentions; // applies when content changes; omitted = parse everything
 }
 
 // ---- Threads, forums, announcements ----

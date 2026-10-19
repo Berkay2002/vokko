@@ -165,7 +165,7 @@ General rules:
 | DELETE | /channels/{id}/followers/{follow_id} | unfollow, MANAGE_WEBHOOKS on the target channel `{id}`, 204 |
 | POST | /channels/{id}/messages/{mid}/crosspost | publish an announcement message to every follower → `Message` with `flags` & CROSSPOSTED. SEND_MESSAGES for own messages, MANAGE_MESSAGES otherwise; only type 5 channels and user messages (types 0, 19); already published → 400 40033 |
 | POST | /channels/{id}/messages | `CreateMessageRequest` → `Message` (slowmode: 429 code 20016, see Slowmode; a reply needs READ_MESSAGE_HISTORY) |
-| PATCH | /channels/{id}/messages/{mid} | author only, `EditMessageRequest` → `Message`. `attachments` lists the ones to keep (others are removed and their files deleted); a result with no content and no attachments → 400 50006 |
+| PATCH | /channels/{id}/messages/{mid} | author only, `EditMessageRequest` → `Message`. `attachments` lists the ones to keep (others are removed and their files deleted); `allowed_mentions` limits who a changed `content` pings, as on send (omitted = parse everything); a result with no content and no attachments → 400 50006 |
 | DELETE | /channels/{id}/messages/{mid} | author or MANAGE_MESSAGES, 204 |
 | PUT | /channels/{id}/messages/{mid}/reactions/{emoji}/@me | emoji URL-encoded (unicode or `name:id`), `?type=1` = super (burst) reaction, absent/0 = normal; 204; custom emoji rules under Custom emoji |
 | DELETE | /channels/{id}/messages/{mid}/reactions/{emoji}/@me | `?type=0\|1` as on PUT, removes only that type; 204 |
