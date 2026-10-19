@@ -11,3 +11,13 @@
 /artifacts
 *.log
 deploy/.env
+/.private
+/deploy/downloads
+/deploy/*.local.yaml
+/apps/desktop/release.production.json
+/apps/desktop/src-tauri/gen
+**/test-results
+**/perf-results
+**/__pycache__
+**/*.pyc
+*.tsbuildinfo
