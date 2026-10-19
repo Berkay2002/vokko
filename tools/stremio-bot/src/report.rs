@@ -36,6 +36,9 @@ pub struct Event<'a> {
     pub duration_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<&'a str>,
+    /// `started` only: the item (`generation` of the `PUT`) whose pipeline started; `tracks` carry theirs in `Tracks`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generation: Option<u64>,
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     pub tracks: Option<&'a Tracks>,
 }
@@ -68,18 +71,41 @@ impl Reporter {
     /// Fire and forget. Everything but `position` is retried a few times, because the server only learns of the end
     /// of a movie from here.
     pub fn send(&self, channel_id: &str, kind: Kind, position_ms: u64, duration_ms: Option<u64>, message: Option<String>) {
-        self.dispatch(channel_id, kind, position_ms, duration_ms, message, None);
+        self.dispatch(channel_id, kind, position_ms, duration_ms, message, None, None);
+    }
+
+    /// The first frame of a pipeline of item `generation`, so the server can drop a late one from the item before.
+    pub fn send_started(&self, channel_id: &str, position_ms: u64, duration_ms: Option<u64>, generation: u64) {
+        self.dispatch(channel_id, Kind::Started, position_ms, duration_ms, None, Some(generation), None);
     }
 
     pub fn send_tracks(&self, channel_id: &str, position_ms: u64, tracks: Tracks) {
-        self.dispatch(channel_id, Kind::Tracks, position_ms, None, None, Some(tracks));
+        self.dispatch(channel_id, Kind::Tracks, position_ms, None, None, None, Some(tracks));
     }
 
-    fn dispatch(&self, channel_id: &str, kind: Kind, position_ms: u64, duration_ms: Option<u64>, message: Option<String>, tracks: Option<Tracks>) {
+    #[allow(clippy::too_many_arguments)]
+    fn dispatch(
+        &self,
+        channel_id: &str,
+        kind: Kind,
+        position_ms: u64,
+        duration_ms: Option<u64>,
+        message: Option<String>,
+        generation: Option<u64>,
+        tracks: Option<Tracks>,
+    ) {
         let this = self.clone();
         let channel_id = channel_id.to_owned();
         tokio::spawn(async move {
-            let body = Event { channel_id: &channel_id, event: kind.name(), position_ms, duration_ms, message: message.as_deref(), tracks: tracks.as_ref() };
+            let body = Event {
+                channel_id: &channel_id,
+                event: kind.name(),
+                position_ms,
+                duration_ms,
+                message: message.as_deref(),
+                generation,
+                tracks: tracks.as_ref(),
+            };
             let attempts = if kind == Kind::Position { 1 } else { 4 };
             for attempt in 1..=attempts {
                 match this.client.post(this.url.as_ref()).bearer_auth(this.secret.as_ref()).json(&body).send().await {
@@ -101,15 +127,19 @@ mod tests {
 
     #[test]
     fn event_json_shape() {
-        let e = Event { channel_id: "42", event: Kind::Position.name(), position_ms: 5000, duration_ms: None, message: None, tracks: None };
+        let e = Event { channel_id: "42", event: Kind::Position.name(), position_ms: 5000, duration_ms: None, message: None, generation: None, tracks: None };
         assert_eq!(serde_json::to_string(&e).expect("json"), r#"{"channel_id":"42","event":"position","position_ms":5000}"#);
-        let e = Event { channel_id: "42", event: Kind::Error.name(), position_ms: 1, duration_ms: Some(9), message: Some("boom"), tracks: None };
+        let e =
+            Event { channel_id: "42", event: Kind::Error.name(), position_ms: 1, duration_ms: Some(9), message: Some("boom"), generation: None, tracks: None };
         assert_eq!(serde_json::to_string(&e).expect("json"), r#"{"channel_id":"42","event":"error","position_ms":1,"duration_ms":9,"message":"boom"}"#);
         let tracks = Tracks { generation: 7, audio: Some(1), burned_subtitle: None, audio_tracks: Vec::new(), subtitle_tracks: Vec::new() };
-        let e = Event { channel_id: "42", event: Kind::Tracks.name(), position_ms: 0, duration_ms: None, message: None, tracks: Some(&tracks) };
+        let e =
+            Event { channel_id: "42", event: Kind::Tracks.name(), position_ms: 0, duration_ms: None, message: None, generation: None, tracks: Some(&tracks) };
         assert_eq!(
             serde_json::to_string(&e).expect("json"),
             r#"{"channel_id":"42","event":"tracks","position_ms":0,"generation":7,"audio":1,"audio_tracks":[],"subtitle_tracks":[]}"#
         );
+        let e = Event { channel_id: "42", event: Kind::Started.name(), position_ms: 0, duration_ms: Some(9), message: None, generation: Some(7), tracks: None };
+        assert_eq!(serde_json::to_string(&e).expect("json"), r#"{"channel_id":"42","event":"started","position_ms":0,"duration_ms":9,"generation":7}"#);
     }
 }

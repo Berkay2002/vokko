@@ -858,9 +858,10 @@ pub struct BotEvent {
     #[serde(default)]
     #[allow(dead_code)]
     message: Option<String>,
-    /// `tracks` only: the item (`generation` of the `PUT`) the lists belong to, what the bot found in the file and what it plays by default.
+    /// `started` and `tracks`: the item (`generation` of the `PUT`) the event belongs to, so a late one from the item before is dropped.
     #[serde(default)]
     generation: Option<u64>,
+    /// `tracks` only: what the bot found in the file and what it plays by default.
     #[serde(default)]
     audio_tracks: Vec<StremioAudioTrack>,
     #[serde(default)]
@@ -934,7 +935,8 @@ pub async fn bot_event(State(state): State<AppState>, headers: HeaderMap, Json(e
         let Some(session) = sessions.get_mut(&channel_id) else { return StatusCode::NO_CONTENT };
         let stale = session.changed.elapsed() < grace;
         match event.event.as_str() {
-            "started" if session.status != StremioStatus::Error => {
+            // Not gated on `stale`: a seek restarts the pipeline and its own `started` comes within the grace.
+            "started" if event.generation == Some(session.generation) && session.status != StremioStatus::Error => {
                 session.duration_ms = event.duration_ms.or(session.duration_ms);
                 session.position_ms = event.position_ms;
                 session.updated_at_ms = now;

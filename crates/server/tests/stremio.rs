@@ -541,8 +541,12 @@ impl World {
         self.app.router.clone().oneshot(request).await.expect("response").status()
     }
 
+    /// A `started` without a `generation` gets the current item's, as the bot sends it.
     async fn event(&self, event: &str, extra: Value) -> StatusCode {
         let mut body = json!({"channel_id": self.voice, "event": event, "position_ms": 0});
+        if event == "started" {
+            body["generation"] = self.bot.puts(&self.voice).last().expect("a bot PUT")["generation"].clone();
+        }
         body.as_object_mut().expect("object").extend(extra.as_object().expect("object").clone());
         self.bot_event(BOT_SECRET, body).await
     }
@@ -1382,6 +1386,28 @@ async fn a_stopped_or_replaced_item_is_saved_to_the_library_of_whoever_started_i
     assert_eq!(w.mock.puts("AUTHKEY-1").len(), 1, "nothing more for alice");
     let (_, row) = w.app.get("/stremio/continue", &w.carl).await;
     assert_eq!(row[0]["name"], "Heat", "it shows in Continue watching");
+}
+
+#[tokio::test]
+async fn a_late_started_of_the_item_before_does_not_start_the_next_one() {
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    w.link(&w.alice).await;
+    w.join(&mut alice).await;
+    w.mock.seed("AUTHKEY-1", Vec::new());
+    w.play_to(&w.alice, "movie", "tt0111161", "A 1080p", 7_200_000, 600_000).await;
+    let before = w.bot.puts(&w.voice).last().expect("a bot PUT")["generation"].clone();
+    let sid = World::sid(&w.streams(&w.alice).await, "A 720p");
+    assert_eq!(w.app.put_json(&w.path(), &w.alice, json!({"sid": sid})).await.0, StatusCode::OK);
+
+    // The first item's `started` (a retry, or a pipeline that started just as it was replaced) arrives after the replace.
+    let late = json!({"position_ms": 650_000, "duration_ms": 7_200_000, "generation": before});
+    assert_eq!(w.event("started", late).await, StatusCode::NO_CONTENT);
+    let (_, state) = w.app.get(&w.path(), &w.alice).await;
+    assert_eq!((state["status"].as_str(), state.get("duration_ms")), (Some("starting"), None), "{state}");
+    w.stop_and_settle(&w.alice).await;
+    let puts = w.mock.puts("AUTHKEY-1");
+    assert!(puts.iter().all(|put| put["state"]["timeOffset"].as_u64() < Some(650_000)), "the item that never played is not written: {puts:?}");
 }
 
 #[tokio::test]

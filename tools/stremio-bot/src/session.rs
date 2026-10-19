@@ -337,7 +337,12 @@ impl Live {
         self.stop_pipeline().await;
         self.ensure_cache().await?;
         let (Some(d), Some(source), Some(out), Some(cache)) = (&self.desired, &self.source, &self.out, &self.cache) else { return Err("not ready".into()) };
-        let notify = Notify { reporter: self.mgr.reporter.clone(), channel_id: self.channel_id.clone(), duration_ms: source.probe.duration_ms };
+        let notify = Notify {
+            reporter: self.mgr.reporter.clone(),
+            channel_id: self.channel_id.clone(),
+            duration_ms: source.probe.duration_ms,
+            generation: d.generation,
+        };
         let pipeline = Pipeline::spawn(&self.mgr.cfg, cache, &source.probe, &source.geo, self.choice, !self.text_off, at_ms, out, notify)
             .await
             .map_err(|e| redact(&e, d))?;
