@@ -412,7 +412,8 @@ A poll is a message with `poll` (Discord's shape: `Poll`, `PollCreateRequest`, `
 question 1-300 characters, 1-10 answers of 1-55 characters each with an optional emoji, `duration` 1-768 hours (default 24; the client offers
 1 h, 4 h, 8 h, 24 h, 3 d, 1 w, 2 w), `allow_multiselect` default false, `layout_type` 1. `content` is optional next to a poll; attachments are not allowed
 (400 50035). Guild channels need SEND_MESSAGES and SEND_POLLS (1<<49, part of the default @everyone set); DMs and group DMs need nothing extra.
-Forum channels take no messages, so no polls (50024).
+Forum channels take no messages, so no polls (50024). A custom answer emoji is checked like a reaction's (400 10014 unknown, 403 50013 when the
+author may not use it; see Custom emoji) and keeps its stored name.
 
 - **Results** are computed live: `results.answer_counts` has one entry per answer (zero counts included) and `me_voted` is per viewer (REST and
   each receiver of MESSAGE_CREATE/UPDATE). `is_finalized` turns true once the poll has ended and its result message exists.

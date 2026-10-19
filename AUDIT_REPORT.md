@@ -61,6 +61,7 @@ All shas confirmed present in `git log --oneline main..HEAD` and not reverted. "
 | deps-ci-tests-docs-5 | low | README gave the VOKKO_MAX_UPLOAD_MB default as 25 (real: 500) | README.md:49 | e114375d | | yes |
 | deps-ci-tests-docs-6 | low | docs/architecture.md described the original skeleton. Now marked historical with a current-shape section | docs/architecture.md:3 | f4d4009a | | yes |
 | uploads-outbound-ssrf-3 | medium | Embed-media proxy: a joiner taking over a cancelled download ran it without a per-address slot, so one address could fill every server-wide download slot; a cancelled starter orphaned its inflight cell. Now whoever runs a download holds its own caller's slot (a slotless takeover gives up at once), and the cell is forgotten once nobody uses it. Redone after the first attempt was reverted (section 3), reviewed twice | crates/server/src/embed_media.rs:304 | 0af6be9e, 0966587b | | |
+| server-messages-threads-6 | low | Poll answer custom emoji were only shape-checked, so members could attach role-restricted, external or made-up emoji. Now resolved like reactions (10014 unknown, 50013 unusable, USE_EXTERNAL_EMOJIS; stored name kept) | crates/server/src/polls.rs:55 | audit-followups | yes | yes |
 
 Notes on fixed items:
 - The new CI `privacy` job must be added to required checks if branch protection lists them.
@@ -117,7 +118,6 @@ The fixer skipped no confirmed fix. Partial-scope items noted by fixers:
 | server-messages-threads-3 | Rejected send still starts slowmode | crates/server/src/routes/messages.rs:742 | Move check after prepare, or roll back the slot |
 | server-messages-threads-4 | Forward with comment in slowmode reports the forward as failed | apps/desktop/src/media/ForwardModal.tsx:36 | Send comment in the same request |
 | server-messages-threads-5 | Starting a thread skips the parent's slowmode | crates/server/src/routes/threads.rs:197 | Run check_slowmode on the parent |
-| server-messages-threads-6 | Poll answer custom emoji not permission-checked | crates/server/src/polls.rs:55 | Resolve via `emojis::usable_by` |
 | gateway-realtime-8 | Duplicate socket when `online` fires during backoff | apps/desktop/src/api/gateway.ts:59 | Teardown before open |
 | gateway-realtime-9 | Client RESUME_WINDOW check is dead code; server ignores session_ttl on resume | apps/desktop/src/api/gateway.ts:197 | Capture lastAckAt first; enforce TTL server-side |
 | gateway-realtime-10 | Handshake timeout during send_active leaves an orphan session | crates/server/src/gateway.rs:207 | Stop the timeout once the session opens |

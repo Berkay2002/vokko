@@ -687,7 +687,9 @@ async fn create_message(
             if forwarding || !sticker_ids.is_empty() {
                 return Err(ApiErr::invalid("poll", "A poll message cannot carry stickers or be a forward."));
             }
-            Some(polls::validate(request)?)
+            let mut draft = polls::validate(request)?;
+            polls::resolve_emojis(&state, user_id, &access, &mut draft).await?;
+            Some(draft)
         }
         None => None,
     };
