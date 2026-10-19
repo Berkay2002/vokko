@@ -3,9 +3,12 @@ import type { Message } from '../api/types';
 import { LIVE_KEEP, LIVE_MAX } from './messageState';
 
 const handlers = new Map<string, (d: unknown) => void>();
+const sessionEnd: (() => void)[] = [];
 vi.mock('./shell', () => ({
+  onSessionEnd: (cb: () => void) => { sessionEnd.push(cb); },
+  onUserChange: () => {},
   gateway: { on: (event: string, fn: (d: unknown) => void) => { handlers.set(event, fn); return () => {}; } },
-  request: vi.fn(),
+  request: vi.fn(() => Promise.reject(new Error('offline'))),
   setLocalReadPointer: vi.fn(),
 }));
 const { messageStore } = await import('./messageStore');
@@ -42,5 +45,20 @@ describe('live trim of an open channel', () => {
     const deliver = openFull('c3', () => true);
     messageStore.setFollowing('c3', null);
     expect(deliver()).toBe(LIVE_MAX + 1);
+  });
+});
+
+describe('session end', () => {
+  it("drops the signed-out account's history and failed sends, so the next account cannot retry them", async () => {
+    messageStore.seed('c9', [msg('c9', 1)]);
+    let renders = 0;
+    messageStore.subscribe('c9', () => { renders++; });
+    messageStore.send('c9', { id: 'a', username: 'a' } as never, { content: 'secret' });
+    await vi.waitFor(() => expect(messageStore.getState('c9').pending[0]?.state).toBe('failed'));
+    const before = renders;
+    sessionEnd.forEach(cb => cb());
+    expect(renders).toBeGreaterThan(before);
+    expect(messageStore.getState('c9').pending).toEqual([]);
+    expect(messageStore.getState('c9').messages).toEqual([]);
   });
 });

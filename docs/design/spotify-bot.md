@@ -120,6 +120,8 @@ Vokko's `Cargo.lock`, the crate is excluded from the workspace (`exclude = ["too
 
 - The bot publishes into the media LiveKit in a fresh room per session, `spotify-<channel_id>-<random hex>`, named only in the
   tokens, exactly like Stremio's §12 rule. Identity `bot:spotify:<channel_id>`, name `Spotify`.
+- Every bot `PUT /session` carries a freshly minted bot token (12 h): the bot joins with the token of whichever `PUT` opens its
+  session, which can come long after the start (a rejoin after an error, an idle spell or a restart).
 - **One media activity per channel.** `PUT /channels/{id}/spotify` while a Stremio session runs there returns 409 (a new error code the server worker adds to docs/api.md)
   "Stop the movie first", and Stremio's `PUT` gets the mirror check. Watch Together (YouTube, client-side) stays allowed next to either.
   So a call never has two media rooms, and each client keeps exactly one media `Room`.

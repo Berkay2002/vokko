@@ -133,6 +133,10 @@ pub async fn update(
         other => other,
     };
     let encoded = activities.as_ref().map(|list| serde_json::to_string(list).unwrap_or_else(|_| "[]".to_owned()));
+    // the row before this write, read under the same lock, so a concurrent session of the user cannot hide a transition
+    let mut tx = state.db.begin().await?;
+    let previous: Option<RawRow> =
+        sqlx::query_as(&format!("SELECT {ROW_COLUMNS} FROM presences WHERE user_id = $1 FOR UPDATE")).bind(user_id).fetch_optional(&mut *tx).await?;
     sqlx::query(
         "INSERT INTO presences (user_id, status, preferred, custom_status, activities) VALUES ($1, $2, $3, $4, COALESCE($8, '[]')) \
          ON CONFLICT (user_id) DO UPDATE SET preferred = COALESCE($5, presences.preferred), \
@@ -149,13 +153,14 @@ pub async fn update(
     .bind(custom_status.is_some())
     .bind(connected)
     .bind(encoded)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     // a sharing setting may have changed (and been re-applied) between the filter above and this write
     if filtered {
         refilter(state, user_id).await?;
     }
-    publish(state, user_id).await
+    publish_changed(state, user_id, previous.map(Row::from_raw)).await
 }
 
 /// The first connection of a user opened: the chosen status comes back. Activities start empty (the client sends its own
@@ -171,9 +176,21 @@ pub async fn disconnected(state: &AppState, user_id: i64) -> ApiResult<()> {
 
 /// Sends the user's current presence to everyone who shares something with them, each in their own view.
 pub async fn publish(state: &AppState, user_id: i64) -> ApiResult<()> {
+    publish_changed(state, user_id, None).await
+}
+
+/// [`publish`], but with the row before a change (`previous`) only to viewers whose view of the user changed: an invisible
+/// user's connects, games and idle toggles send others nothing, like a truly offline user. Their own sessions always get it.
+async fn publish_changed(state: &AppState, user_id: i64, previous: Option<Row>) -> ApiResult<()> {
     let Some(row) = rows(state, &[user_id]).await?.pop() else { return Ok(()) };
-    let audience = events::user_audience(state, user_id).await?;
+    let mut audience = events::user_audience(state, user_id).await?;
     let hidden = hidden_pairs(state, &[user_id], &audience).await?;
+    if let Some(previous) = previous {
+        audience.retain(|&viewer| {
+            let hide = hidden.contains(&(user_id, viewer));
+            viewer == user_id || previous.view(viewer, hide) != row.view(viewer, hide)
+        });
+    }
     state.hub.send_with(&audience, "PRESENCE_UPDATE", |viewer| GatewayEvent::PresenceUpdate(row.view(viewer, hidden.contains(&(user_id, viewer)))).data());
     Ok(())
 }

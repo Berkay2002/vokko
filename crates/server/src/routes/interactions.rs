@@ -217,6 +217,11 @@ async fn invoke(
     };
     let channel_id = body.channel_id.db();
     let access = channel_access(&state, user_id, channel_id).await?;
+    // The response lands in this channel as a message, so the channel must take one from the caller (like create_message).
+    if access.channel.channel_type() == vokko_protocol::api::ChannelType::GuildCategory {
+        return Err(ApiErr::invalid("channel_id", "Cannot send messages in a category."));
+    }
+    crate::threads::check_send(&access)?;
     let (_, commands) = apps::usable_commands(&state, user_id, &access).await?;
     let command = commands.into_iter().find(|command| command.id == data_id.db() && command.application_id == body.application_id.db());
     let Some(command) = command else {
@@ -761,8 +766,16 @@ pub async fn edit_stored(state: &AppState, channel: &ChannelRow, id: i64, body: 
     .execute(&mut *tx)
     .await?;
     sqlx::query("DELETE FROM message_mentions WHERE message_id = $1").bind(id).execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM message_role_mentions WHERE message_id = $1").bind(id).execute(&mut *tx).await?;
     for user in &mentions.users {
         sqlx::query("INSERT INTO message_mentions (message_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING").bind(id).bind(user).execute(&mut *tx).await?;
+    }
+    if !mentions.roles.is_empty() {
+        sqlx::query("INSERT INTO message_role_mentions (message_id, role_id) SELECT $1, UNNEST($2::bigint[]) ON CONFLICT DO NOTHING")
+            .bind(id)
+            .bind(&mentions.roles)
+            .execute(&mut *tx)
+            .await?;
     }
     tx.commit().await?;
     broadcast_update(state, channel, id).await?.map(|view| view.message).ok_or_else(ApiErr::unknown_message)

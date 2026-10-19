@@ -1072,12 +1072,20 @@ async fn the_bot_gets_the_desired_state_again_as_a_lease_and_an_unreachable_bot_
     until("the startup DELETE", || w.bot.deletes() >= 1).await;
     until("three PUTs", || w.bot.puts().len() >= 3).await;
     let puts = w.bot.puts();
+    let room = |put: &Value| room_of(put["token"].as_str().expect("token"));
     assert_eq!(
-        (&puts[0]["token"], &puts[0]["track"], &puts[0]["seq"]),
-        (&puts[2]["token"], &puts[2]["track"], &puts[2]["seq"]),
+        (room(&puts[0]), &puts[0]["track"], &puts[0]["seq"]),
+        (room(&puts[2]), &puts[2]["track"], &puts[2]["seq"]),
         "the same desired state, the same seq"
     );
     assert!(puts[2]["position_ms"].as_u64() > puts[0]["position_ms"].as_u64(), "and the position moves on while it plays");
+    // Each PUT carries a fresh token: a bot session that opens from a later PUT (after an error or a restart) must not join with
+    // the one minted at the start, which expires after 12 h.
+    let exp = |put: &Value| token::decode_unverified(put["token"].as_str().expect("token")).expect("claims").exp;
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let seen = w.bot.puts().len();
+    until("a later PUT", || w.bot.puts().len() > seen).await;
+    assert!(exp(&w.bot.last_put()) > exp(&puts[0]), "the lease re-send has a newer token");
     w.bot.answer(500);
     assert!(owner.ended().await["state"].is_null(), "the bot stayed unreachable");
 }

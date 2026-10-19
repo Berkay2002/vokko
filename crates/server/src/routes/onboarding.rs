@@ -19,6 +19,7 @@ use crate::auth::AuthUser;
 use crate::error::{ApiErr, ApiResult};
 use crate::extract::{ApiJson, parse_id};
 use crate::routes::auth::clean_text;
+use crate::routes::overwrites;
 use crate::state::AppState;
 use crate::store;
 
@@ -497,6 +498,8 @@ async fn put_responses(
     let earlier: HashSet<i64> = earlier.into_iter().map(|(role,)| role).collect();
     let to_remove: Vec<i64> = earlier.iter().copied().filter(|role| !wanted.contains(role)).collect();
     let to_add: Vec<i64> = wanted.iter().copied().filter(|role| !held.contains(role)).collect();
+    // The channels the member sees before the role change, so the ones it opens or closes reach them.
+    let visible_before = access::visible_guild_channels(&state, user_id, guild).await?;
     if !to_remove.is_empty() {
         sqlx::query("DELETE FROM member_roles WHERE guild_id = $1 AND user_id = $2 AND role_id = ANY($3)")
             .bind(guild)
@@ -540,6 +543,7 @@ async fn put_responses(
         .await?;
     tx.commit().await?;
 
+    overwrites::dispatch_member_visibility(&state, user_id, guild, &visible_before).await?;
     let member = store::member(&state, guild, user_id).await?.ok_or_else(ApiErr::internal)?;
     let members = access::guild_member_ids(&state, guild).await?;
     state.hub.send(&members, &GatewayEvent::GuildMemberUpdate(GuildMemberAdd { member: member.clone(), guild_id: flake(guild) }));

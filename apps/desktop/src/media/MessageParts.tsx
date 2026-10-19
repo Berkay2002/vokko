@@ -81,14 +81,16 @@ export function ForwardedBlock({ message }: { message: Message }) {
   const ref = message.message_reference;
   const source = useStore(s => (ref ? s.channels[ref.channel_id] : undefined));
   if (!view) return null;
-  const gif = gifMessageMedia(view);
+  // Snapshots carry no flags, so only the display settings gate the inline GIF (as in MessageItem).
+  const gifOnly = gifMessageMedia(view);
+  const gif = gifOnly && chat.display.showEmbeds && chat.display.inlineEmbedMedia ? gifOnly : null;
   const date = new Date(view.timestamp);
   const where = source ? (source.guild_id ? `#${source.name ?? 'channel'}` : source.type === ChannelType.GroupDM ? dmName(source) : `@${dmName(source)}`) : null;
   return <div className="media-forward" role="group" aria-label="Forwarded message">
     <div className="media-forward-head"><Forward size={14} aria-hidden="true" /> Forwarded</div>
     {gif ? <GifMessage message={view} media={gif} /> : view.content && <Markdown content={view.content} ctx={chat.md} className="chat-content" />}
     <Attachments message={view} />
-    {!gif && <Embeds message={view} />}
+    {!gifOnly && <Embeds message={view} />}
     <StickerItems items={view.sticker_items} />
     <div className="media-forward-foot">
       <Tooltip content={formatFullDate(date)} side="top"><time dateTime={view.timestamp}>{formatMessageTimestamp(date)}</time></Tooltip>

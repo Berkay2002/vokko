@@ -27,13 +27,17 @@ pub async fn account_info(state: &AppState, user_id: i64) -> ApiResult<AccountIn
     Ok(AccountInfo { email, pending_email, verified, has_password, mfa_enabled })
 }
 
-/// Checks the current password (`password` field). Accounts without one pass without it.
+/// Checks the current password (`password` field). Accounts without one pass without it. Wrong passwords are counted
+/// per account like second-factor codes (10 in 15 minutes, then 429).
 pub async fn confirm_password(state: &AppState, user_id: i64, password: Option<String>) -> ApiResult<()> {
     let (hash,): (Option<String>,) = sqlx::query_as("SELECT password_hash FROM users WHERE id = $1").bind(user_id).fetch_one(&state.db).await?;
     let Some(hash) = hash else { return Ok(()) };
     let mismatch = || ApiErr::invalid("password", "Password does not match.");
     let Some(password) = password.filter(|password| !password.is_empty()) else { return Err(mismatch()) };
-    if verify_password(password, hash).await { Ok(()) } else { Err(mismatch()) }
+    let attempt = super::security::begin_attempt(state, "password_failures", user_id, "Too many wrong passwords. Try again in 15 minutes.").await?;
+    let accepted = verify_password(password, hash).await;
+    super::security::end_attempt(state, "password_failures", attempt, accepted).await?;
+    if accepted { Ok(()) } else { Err(mismatch()) }
 }
 
 /// Confirms it is really the account owner before a sensitive change. Accounts with a password give it (and with
@@ -236,7 +240,7 @@ pub async fn delete_account(
     let others: Vec<(i64,)> = sqlx::query_as("DELETE FROM relationships WHERE other_id = $1 RETURNING user_id").bind(user_id).fetch_all(&mut *tx).await?;
     sqlx::query("DELETE FROM relationships WHERE user_id = $1").bind(user_id).execute(&mut *tx).await?;
     let sessions: Vec<(Vec<u8>,)> = sqlx::query_as("DELETE FROM sessions WHERE user_id = $1 RETURNING token_hash").bind(user_id).fetch_all(&mut *tx).await?;
-    for table in ["email_tokens", "mfa_backup_codes", "mfa_tickets", "mfa_failures", "oauth_identities", "oauth_results"] {
+    for table in ["email_tokens", "mfa_backup_codes", "mfa_tickets", "mfa_failures", "password_failures", "oauth_identities", "oauth_results"] {
         sqlx::query(&format!("DELETE FROM {table} WHERE user_id = $1")).bind(user_id).execute(&mut *tx).await?;
     }
     sqlx::query("DELETE FROM oauth_flows WHERE link_user_id = $1").bind(user_id).execute(&mut *tx).await?;

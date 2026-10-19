@@ -2719,6 +2719,9 @@ pub struct EditMessageRequest {
     /// Bots only, on their own messages: omitted = unchanged, an empty list removes them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub components: Option<Vec<Component>>,
+    /// Applies when `content` changes: omitted = parse everything, like a send.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_mentions: Option<AllowedMentions>,
 }
 
 /// `PATCH /users/@me`. Only the keys that are present change; `null` clears (an empty string clears the text fields too).

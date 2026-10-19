@@ -26,7 +26,7 @@ import { useMessageThreadActions } from '../threads/useMessageActions';
 import { AppTag, EphemeralFooter, InteractionHeader, ThinkingBody, isEphemeral } from '../apps/InteractionMessage';
 import { quickReactions } from './emojiData';
 import { messageStore } from './messageStore';
-import { isSystemMessage, mentionsRole, type PendingMessage } from './messageState';
+import { embedsSuppressed, isSystemMessage, mentionsRole, type PendingMessage } from './messageState';
 import { fromDisplay, toDisplay, type MentionToken } from './mentionText';
 import { formatFullDate, formatMessageTimestamp, formatTime, softKeyboard } from './util';
 import { isVoiceMessage } from './VoiceMessage';
@@ -161,7 +161,9 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, tabS
   const myRoles = chat.members[chat.me.id]?.roles;
   const mentionsMe = !isMine && (message.mentions.some(u => u.id === chat.me.id) || message.mention_everyone || (!!myRoles && mentionsRole(message.content, myRoles)));
   const failed = pending?.state === 'failed';
-  const gif = system ? null : gifMessageMedia(message);
+  // A GIF-only message plays inline only where link media may: with embeds or link media off, or its previews removed, the URL stays text.
+  const gifOnly = system ? null : gifMessageMedia(message);
+  const gif = gifOnly && chat.display.showEmbeds && chat.display.inlineEmbedMedia && !embedsSuppressed(message) ? gifOnly : null;
 
   const canEdit = isMine && !system && !pending && !message.poll && !isVoiceMessage(message) && message.message_reference?.type !== 1; // a forward has no text to edit
   // An AutoMod alert names the flagged member as its author; only moderators remove it.
@@ -282,7 +284,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, tabS
         {gif && <GifMessage message={message} media={gif} />}
         <StickerItems items={message.sticker_items} />
         {message.message_snapshots?.length ? <ForwardedBlock message={message} /> : null}
-        {!gif && <Embeds message={message} />}
+        {!gifOnly && <Embeds message={message} />}
         <MessageComponents message={message} />
         <Reactions message={message} />
         <EphemeralFooter message={message} />

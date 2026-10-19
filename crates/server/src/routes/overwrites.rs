@@ -7,7 +7,7 @@ use axum::http::StatusCode;
 use axum::routing::put;
 use sqlx::{Postgres, Transaction};
 use vokko_protocol::api::permissions::{ADMINISTRATOR, ALL, MANAGE_ROLES};
-use vokko_protocol::api::{AuditEntryInfo, AuditLogEvent, ChannelType, GatewayEvent, OverwriteRequest, OverwriteType, Snowflake};
+use vokko_protocol::api::{AuditEntryInfo, AuditLogEvent, Channel, ChannelType, GatewayEvent, OverwriteRequest, OverwriteType, Snowflake};
 
 use crate::access::{self, ChannelAccess, channel_access};
 use crate::audit::{self, AuditReason, Entry};
@@ -152,18 +152,68 @@ pub async fn lock_to_parent(tx: &mut Transaction<'_, Postgres>, access: &Channel
 /// `before` (the viewers computed before the change) and CHANNEL_CREATE to those who gained it.
 pub async fn dispatch_visibility(state: &AppState, row: &ChannelRow, before: &[i64]) -> ApiResult<()> {
     let after = access::channel_viewers(state, row).await?;
-    let Some(channel) = store::channel(state, row.id, None).await? else { return Ok(()) };
+    let Some(channel) = send_visibility_diff(state, row.id, before, &after, true).await? else { return Ok(()) };
     let before_set: HashSet<i64> = before.iter().copied().collect();
-    let after_set: HashSet<i64> = after.iter().copied().collect();
-    let lost: Vec<i64> = before.iter().copied().filter(|user| !after_set.contains(user)).collect();
-    let gained: Vec<i64> = after.iter().copied().filter(|user| !before_set.contains(user)).collect();
-    let kept: Vec<i64> = after.iter().copied().filter(|user| before_set.contains(user)).collect();
-    state.hub.send(&lost, &GatewayEvent::ChannelDelete(channel.clone()));
-    state.hub.send(&gained, &GatewayEvent::ChannelCreate(channel.clone()));
+    let kept: Vec<i64> = after.into_iter().filter(|user| before_set.contains(user)).collect();
     state.hub.send(&kept, &GatewayEvent::ChannelUpdate(channel));
     // Members in voice who lost VIEW_CHANNEL / CONNECT leave; SPEAK / STREAM changes reach LiveKit.
     if let Some(guild_id) = row.guild_id {
         crate::voice::state::recompute_guild(state, guild_id).await;
+    }
+    Ok(())
+}
+
+/// CHANNEL_DELETE to the users in `before` but not `after`, CHANNEL_CREATE to those in `after` but not `before`.
+/// Returns the channel, or None when it is gone. Nothing is loaded or sent when the audience is unchanged and `always_load` is false.
+async fn send_visibility_diff(state: &AppState, channel_id: i64, before: &[i64], after: &[i64], always_load: bool) -> ApiResult<Option<Channel>> {
+    let before_set: HashSet<i64> = before.iter().copied().collect();
+    let after_set: HashSet<i64> = after.iter().copied().collect();
+    let lost: Vec<i64> = before.iter().copied().filter(|user| !after_set.contains(user)).collect();
+    let gained: Vec<i64> = after.iter().copied().filter(|user| !before_set.contains(user)).collect();
+    if lost.is_empty() && gained.is_empty() && !always_load {
+        return Ok(None);
+    }
+    let Some(channel) = store::channel(state, channel_id, None).await? else { return Ok(None) };
+    state.hub.send(&lost, &GatewayEvent::ChannelDelete(channel.clone()));
+    state.hub.send(&gained, &GatewayEvent::ChannelCreate(channel.clone()));
+    Ok(Some(channel))
+}
+
+/// The viewers of every non-thread channel of the guild, taken before a role's permissions change; see `dispatch_guild_visibility`.
+// ponytail: one channel_viewers per channel, fine at single-instance scale; resolve all channels in one pass if guilds get large.
+pub async fn guild_viewers(state: &AppState, guild_id: i64) -> ApiResult<Vec<(i64, Vec<i64>)>> {
+    let rows: Vec<ChannelRow> = sqlx::query_as(&format!("SELECT {} FROM channels WHERE guild_id = $1 AND kind NOT IN (10, 11, 12)", store::CHANNEL_COLS))
+        .bind(guild_id)
+        .fetch_all(&state.db)
+        .await?;
+    let mut viewers = Vec::with_capacity(rows.len());
+    for row in rows {
+        viewers.push((row.id, access::channel_viewers(state, &row).await?));
+    }
+    Ok(viewers)
+}
+
+/// CHANNEL_DELETE / CHANNEL_CREATE to the members who lost / gained VIEW_CHANNEL in each channel since `before` (`guild_viewers`).
+/// Channels that kept their audience get nothing; the caller recomputes voice.
+pub async fn dispatch_guild_visibility(state: &AppState, before: &[(i64, Vec<i64>)]) -> ApiResult<()> {
+    for (channel_id, viewers) in before {
+        let Some(row) = store::channel_row(state, *channel_id).await? else { continue };
+        let after = access::channel_viewers(state, &row).await?;
+        send_visibility_diff(state, row.id, viewers, &after, false).await?;
+    }
+    Ok(())
+}
+
+/// CHANNEL_DELETE / CHANNEL_CREATE to `user_id` alone for the guild channels they lost / gained since `before`
+/// (`access::visible_guild_channels`, taken before their roles changed). Nothing when they are no longer a member.
+pub async fn dispatch_member_visibility(state: &AppState, user_id: i64, guild_id: i64, before: &[ChannelRow]) -> ApiResult<()> {
+    let Ok(after) = access::visible_guild_channels(state, user_id, guild_id).await else { return Ok(()) };
+    let target = [user_id];
+    for row in before.iter().filter(|row| !after.iter().any(|now| now.id == row.id)) {
+        send_visibility_diff(state, row.id, &target, &[], false).await?;
+    }
+    for row in after.iter().filter(|row| !before.iter().any(|then| then.id == row.id)) {
+        send_visibility_diff(state, row.id, &[], &target, false).await?;
     }
     Ok(())
 }

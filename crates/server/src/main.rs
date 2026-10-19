@@ -53,6 +53,15 @@ async fn serve(state: AppState) -> Result<(), String> {
     // Connection info feeds the per-client-address limits (auth routes, gateway sockets).
     axum::serve(listener, vokko_server::router(state).into_make_service_with_connect_info::<std::net::SocketAddr>())
         .with_graceful_shutdown(async {
+            // Docker and systemd stop with SIGTERM; as a container's PID 1 the server would otherwise ignore it.
+            #[cfg(unix)]
+            if let Ok(mut term) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+                tokio::select! {
+                    _ = term.recv() => {}
+                    _ = tokio::signal::ctrl_c() => {}
+                }
+                return;
+            }
             let _ = tokio::signal::ctrl_c().await;
         })
         .await

@@ -41,7 +41,7 @@ Desktop (Tauri) clients connect to `VOKKO_PUBLIC_URL` directly; their `tauri://l
 
 ## Configuration
 
-Read by `vokko-server` from the environment (a `.env.dev` file found from the working directory upwards is a fallback for development; the container uses real environment variables). Compose maps the `.env` file onto these.
+Read by `vokko-server` from the environment (a `.env.dev` file found from the working directory upwards is a fallback for development; the container uses real environment variables). Compose passes every key of `deploy/.env` into the server container (`env_file`), so any variable below can be set there; the entries in the compose file's `environment:` (`DATABASE_URL`, `VOKKO_BIND`, `VOKKO_DATA_DIR`, `VOKKO_DESKTOP_LATEST_JSON`) take precedence.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -165,7 +165,7 @@ limit:
   bytes_per_sec: 12500000   # ~100 Mbit/s egress backstop; set it below your upload bandwidth
 ```
 
-The webhook URL is how LiveKit reaches vokko-server, not a public URL: keep `/internal/*` off the reverse proxy (the sample Caddyfile only forwards `/api/*` and `/gateway`). Webhooks are signed with the API secret; anything unsigned gets 401.
+The webhook URL is how LiveKit reaches vokko-server, not a public URL: point it at `127.0.0.1` and keep every other `/internal/*` path off the reverse proxy. The bundled Caddyfile forwards `/api/*`, `/gateway`, `/healthz` and `/internal/livekit/webhook`; the webhook path is there only so LiveKit Cloud can reach the server, and with LiveKit on the same host your own proxy can leave it out. Webhooks are signed with the API secret; anything unsigned gets 401.
 
 **macOS (recommended for a Mac host): run LiveKit natively.** Docker Desktop on macOS forwards UDP through a VM in userspace, which adds latency and CPU for every packet. Install the native binary (`brew install livekit`, or the release binary from GitHub) and run it under launchd, keeping vokko-server and PostgreSQL in Docker:
 
@@ -306,6 +306,7 @@ The bundled `web` profile already runs Caddy with automatic certificates (`deplo
 ```caddyfile
 chat.example.com {
 	encode zstd gzip
+	# with LiveKit Cloud, also add /internal/livekit/webhook so its webhooks reach the server
 	@vokko path /api/* /gateway
 	reverse_proxy @vokko 127.0.0.1:8710
 	# plus root * /srv/vokko-web / try_files {path} /index.html / file_server if you host the web client yourself

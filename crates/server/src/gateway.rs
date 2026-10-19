@@ -39,6 +39,8 @@ pub const CLOSE_AUTH_FAILED: u16 = 4004;
 pub const CLOSE_RATE_LIMITED: u16 = 4008;
 pub const CLOSE_HEARTBEAT_TIMEOUT: u16 = 4009;
 const CLOSE_INTERNAL_ERROR: u16 = 1011;
+/// Failed Resumes (undecodable, unknown or foreign session, gap) answered per unidentified socket; the next Resume closes 4008.
+const MAX_FAILED_RESUMES: u32 = 2;
 
 /// Largest message or frame a client may send.
 pub const MAX_CLIENT_MESSAGE_BYTES: usize = 16 * 1024;
@@ -168,6 +170,7 @@ async fn handle(state: AppState, socket: WebSocket, slot: PreauthSlot) {
 
 /// Waits for Identify or Resume. `None` means the connection is over (bad token, socket closed).
 async fn handshake(state: &AppState, writer: &mut Writer, stream: &mut Stream, link: Link) -> Option<(Arc<Session>, u64)> {
+    let mut failed_resumes = 0;
     while let Some(Ok(message)) = stream.next().await {
         let Message::Text(text) = message else {
             if matches!(message, Message::Close(_)) {
@@ -204,14 +207,34 @@ async fn handshake(state: &AppState, writer: &mut Writer, stream: &mut Stream, l
                 };
                 let (session, generation) =
                     state.hub.open_session(user_id, session_id, hash_token(&identify.token), link, GatewayEvent::Ready(Box::new(ready)).data());
+                // A revoke during build_ready deleted the token before this session was registered, so close_token_sessions
+                // missed it. Revokers delete the row before purging, so checking after registration closes the window.
+                if !matches!(user_for_token(state, &identify.token).await, Ok(Some(id)) if id == user_id) {
+                    state.hub.remove_session(&session.id);
+                    writer.close(CLOSE_AUTH_FAILED).await;
+                    return None;
+                }
                 voice::calls::send_active(state, &session).await;
                 return Some((session, generation));
             }
             GatewayOp::Resume => {
-                let Ok(resume) = serde_json::from_value::<Resume>(payload.d) else { continue };
-                let owner = user_for_token(state, &resume.token).await.ok().flatten();
-                let session = state.hub.session(&resume.session_id).filter(|session| Some(session.user_id) == owner);
-                let Some(session) = session else {
+                // A client re-identifies after one InvalidSession, so more failed resumes than that is a probe: stop it.
+                if failed_resumes >= MAX_FAILED_RESUMES {
+                    writer.close(CLOSE_RATE_LIMITED).await;
+                    return None;
+                }
+                let Ok(resume) = serde_json::from_value::<Resume>(payload.d) else {
+                    failed_resumes += 1;
+                    continue;
+                };
+                // Unknown session ids (128-bit random) are answered without a database lookup.
+                let session = state.hub.session(&resume.session_id);
+                let owner = match &session {
+                    Some(_) => user_for_token(state, &resume.token).await.ok().flatten(),
+                    None => None,
+                };
+                let Some(session) = session.filter(|session| Some(session.user_id) == owner) else {
+                    failed_resumes += 1;
                     if !writer.frame(GatewayOp::InvalidSession, Value::Bool(false)).await {
                         return None;
                     }
@@ -221,6 +244,7 @@ async fn handshake(state: &AppState, writer: &mut Writer, stream: &mut Stream, l
                 match session.resume(link.clone(), resume.seq, ("RESUMED", GatewayEvent::Resumed.data())) {
                     ResumeOutcome::Resumed { generation, .. } => return Some((session, generation)),
                     ResumeOutcome::Gap => {
+                        failed_resumes += 1;
                         state.hub.remove_session(&session.id);
                         if !writer.frame(GatewayOp::InvalidSession, Value::Bool(false)).await {
                             return None;

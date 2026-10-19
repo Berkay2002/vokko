@@ -174,7 +174,7 @@ impl EmbedMediaProxy {
 
     /// The image from the cache, or fetched (once, however many requests ask at the same time) and cached. A miss first waits
     /// (up to `TIMEOUT`) for one of `caller`'s `MAX_PER_ADDRESS` slots; cache hits and joining a download already under way
-    /// do not.
+    /// do not, unless its starter goes away and this caller takes it over (see `Cache::get_or_fetch`).
     pub async fn get(&self, url: Url, caller: IpAddr) -> ApiResult<Served> {
         let key = url.to_string();
         let admit = async { tokio::time::timeout(TIMEOUT, self.per_address.acquire(crate::ratelimit::address_key(caller))).await.ok().flatten() };
@@ -236,7 +236,31 @@ struct Cache {
     max_bytes: u64,
     index: Mutex<Index>,
     /// One cell per image being fetched: concurrent misses wait for the same download (and share its failure).
-    inflight: Mutex<HashMap<String, Arc<tokio::sync::OnceCell<Option<Image>>>>>,
+    inflight: Inflight,
+}
+
+type Cell = Arc<tokio::sync::OnceCell<Option<Image>>>;
+type Inflight = Mutex<HashMap<String, Cell>>;
+
+/// A caller's use of an inflight cell. On drop (a cancelled request included) the cell is forgotten once it is done, so later
+/// misses read the disk or start over, or once nobody else uses it; never while another caller still waits on it.
+struct Using<'a> {
+    inflight: &'a Inflight,
+    key: &'a str,
+    /// Always set until drop.
+    cell: Option<Cell>,
+}
+
+impl Drop for Using<'_> {
+    fn drop(&mut self) {
+        let mut inflight = lock(self.inflight);
+        // dropped under the lock, so two callers leaving at once cannot each count the other and both keep it
+        let Some(cell) = self.cell.take() else { return };
+        // the map's copy and ours: nobody else uses it
+        if inflight.get(self.key).is_some_and(|current| Arc::ptr_eq(current, &cell)) && (cell.initialized() || Arc::strong_count(&cell) == 2) {
+            inflight.remove(self.key);
+        }
+    }
 }
 
 #[derive(Default)]
@@ -288,9 +312,11 @@ impl Cache {
         Self { dir, max_bytes, index: Mutex::new(index), inflight: Mutex::default() }
     }
 
-    /// Only a miss that starts the download awaits `admit` (the caller's own download slot, held until this returns), and it
-    /// does so before the download is shared: whoever joins one already under way neither takes a slot of theirs nor waits on
-    /// someone else's.
+    /// Whoever runs the download holds its own caller's slot from `admit` (until the download ends). A miss that starts one
+    /// awaits it before the download is shared, so a caller waiting for a slot holds up nobody; whoever joins one already under
+    /// way takes no slot, unless the starter goes away and this caller takes the download over: then it needs a slot of its own
+    /// free right away, or it gives up at once and the next caller waiting on the download takes it over (waiting for a slot
+    /// there would hold up everyone behind it).
     async fn get_or_fetch<G, F: Future<Output = Option<Image>>>(
         &self,
         url: &str,
@@ -302,34 +328,35 @@ impl Cache {
             return Some(hit);
         }
         let joined = lock(&self.inflight).get(&key).cloned();
-        let (cell, _admitted) = match joined {
-            Some(cell) => (cell, None),
+        let (using, admitted, admit) = match joined {
+            Some(cell) => (Using { inflight: &self.inflight, key: &key, cell: Some(cell) }, None, Some(admit)),
             None => {
                 let admitted = admit.await?;
-                let mut inflight = lock(&self.inflight);
-                // someone may have started it while this caller waited for a slot
-                let started = inflight.contains_key(&key);
-                (inflight.entry(key.clone()).or_default().clone(), (!started).then_some(admitted))
+                // it may have been cached while this caller waited for a slot
+                if let Some(hit) = self.read(&key).await {
+                    return Some(hit);
+                }
+                // someone may have started it meanwhile: this caller joins it (and keeps the slot, in case it takes over)
+                let cell = lock(&self.inflight).entry(key.clone()).or_default().clone();
+                (Using { inflight: &self.inflight, key: &key, cell: Some(cell) }, Some(admitted), None)
             }
         };
-        // it may have been cached between the read above and taking the cell
-        let served = match self.read(&key).await {
-            Some(hit) => Some(hit),
-            None => cell
-                .get_or_init(|| async {
-                    let image = fetch().await?;
-                    self.write(&key, &image).await;
-                    Some(image)
-                })
-                .await
-                .clone()
-                .map(Served::from),
-        };
-        let mut inflight = lock(&self.inflight);
-        if inflight.get(&key).is_some_and(|current| Arc::ptr_eq(current, &cell)) {
-            inflight.remove(&key);
-        }
-        served
+        let image = using
+            .cell
+            .as_ref()?
+            .get_or_try_init(|| async {
+                let _slot = match admitted {
+                    Some(slot) => slot,
+                    None => tokio::time::timeout(Duration::ZERO, admit.ok_or(())?).await.ok().flatten().ok_or(())?,
+                };
+                let image = fetch().await;
+                if let Some(image) = &image {
+                    self.write(&key, image).await;
+                }
+                Ok::<_, ()>(image)
+            })
+            .await;
+        image.ok()?.clone().map(Served::from)
     }
 
     async fn read(&self, key: &str) -> Option<Served> {
@@ -471,6 +498,37 @@ mod tests {
         assert_eq!(started, Some(("image/png", png(100))));
         assert_eq!(joined.map(|served| served.length), Some(100));
         assert_eq!(fetches.load(Ordering::SeqCst), 2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_joiner_taking_over_a_cancelled_download_needs_a_free_slot_of_its_own() {
+        let dir = dir("takeover");
+        let cache = Cache::open(dir.clone(), CACHE_MAX_BYTES);
+        let url = "https://example.com/a.png";
+        let fetches = AtomicUsize::new(0);
+        // an admitted caller starts the download; one whose address has no free slot joins it, then one whose address has a free slot
+        let mut starter = Box::pin(cache.get_or_fetch(url, async { Some(()) }, std::future::pending));
+        assert!(tokio::time::timeout(Duration::from_millis(20), &mut starter).await.is_err());
+        let mut slotless = Box::pin(cache.get_or_fetch(url, std::future::pending::<Option<()>>(), || async {
+            fetches.fetch_add(1, Ordering::SeqCst);
+            Some(("image/png", png(1)))
+        }));
+        assert!(tokio::time::timeout(Duration::from_millis(20), &mut slotless).await.is_err());
+        let mut admitted = Box::pin(get(&cache, url, &fetches, 100));
+        assert!(tokio::time::timeout(Duration::from_millis(20), &mut admitted).await.is_err());
+        // the starter's client goes away: the slotless joiner takes over first, but gives up at once instead of holding up the
+        // next one, which runs the download under its own slot
+        drop(starter);
+        let gave_up = tokio::time::timeout(Duration::from_millis(50), &mut slotless).await.expect("it does not wait for a slot");
+        assert!(gave_up.is_none());
+        let served = tokio::time::timeout(Duration::from_secs(1), &mut admitted).await.expect("the next one runs it");
+        assert_eq!(served, Some(("image/png", png(100))));
+        assert_eq!(fetches.load(Ordering::SeqCst), 1);
+        assert!(lock(&cache.inflight).is_empty(), "nobody uses it any more");
+        // so the next miss reads the disk
+        assert_eq!(get(&cache, url, &fetches, 100).await, Some(("image/png", png(100))));
+        assert_eq!(fetches.load(Ordering::SeqCst), 1);
         let _ = std::fs::remove_dir_all(dir);
     }
 

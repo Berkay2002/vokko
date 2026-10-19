@@ -7,7 +7,7 @@ import { MessageFlags, MessageType } from '../api/types';
 import { ReactionType } from '../api/types';
 import { announceBurst } from '../perks/SuperReactions';
 import type { CreateMessageRequest, EditMessageRequest, Message, MessageReactionEvent, PendingAttachmentMeta, ReactionEmoji, Snowflake, StickerItem, User } from '../api/types';
-import { gateway, request, setLocalReadPointer } from './shell';
+import { gateway, onSessionEnd, onUserChange, request, setLocalReadPointer } from './shell';
 import {
   PAGE_SIZE, TYPING_TTL_MS, appendPage, applyReaction, deleteMessage, emojiKey, emptyState, indexOfId, prependPage, replaceWindow, setTyping,
   applyUserUpdate, normalizeMessage, trimOldest, updateIfPresent, upsertMessage, withLateArrivals, type ChannelState, type PendingMessage,
@@ -45,6 +45,27 @@ const EMPTY: ChannelState = emptyState();
 function notify(channelId: Snowflake): void {
   listeners.get(channelId)?.forEach(l => l());
 }
+
+/** Drops everything the signed-in account left behind (history, unsent and failed sends, in-flight uploads) so the next
+ *  account never sees it or retries it as its own. Listeners stay: mounted lists re-render empty. */
+function reset(): void {
+  waiting.forEach(abort => abort());
+  waiting.clear();
+  reactionChains.forEach(c => { if (c.timer) clearTimeout(c.timer); });
+  reactionChains.clear();
+  states.clear();
+  touched.clear();
+  cancelled.clear();
+  heldUnread.clear();
+  currentUserId = null;
+  listeners.forEach((_, id) => notify(id));
+}
+onSessionEnd(reset);
+let owner: Snowflake | null = null;
+onUserChange(id => {
+  if (owner && id && id !== owner) reset();
+  if (id) owner = id;
+});
 
 function update(channelId: Snowflake, fn: (s: ChannelState) => ChannelState): void {
   const s = states.get(channelId);

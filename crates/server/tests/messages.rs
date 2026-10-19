@@ -189,6 +189,25 @@ async fn reply_payload_and_deleted_reference() {
     let (_, listed) = s.app.get(&format!("{base}?limit=1"), &s.owner).await;
     assert_eq!(listed[0]["referenced_message"]["content"], "original");
 
+    // without READ_MESSAGE_HISTORY a reply would hand back the old message in referenced_message
+    sqlx::query("INSERT INTO permission_overwrites (channel_id, target_id, target_type, allow, deny) VALUES ($1, $2, 0, 0, $3)")
+        .bind(s.channel.parse::<i64>().expect("id"))
+        .bind(s.guild.parse::<i64>().expect("id"))
+        .bind(1_i64 << 16)
+        .execute(&s.app.state.db)
+        .await
+        .expect("overwrite");
+    let (status, error) = s.app.post(&base, &s.member, json!({"content": "peek", "message_reference": {"message_id": oid}})).await;
+    assert_eq!((status, error["code"].clone()), (StatusCode::FORBIDDEN, json!(50013)));
+    assert_eq!(error["referenced_message"], Value::Null);
+    let (_, listed) = s.app.get(&format!("{base}?limit=1"), &s.owner).await;
+    assert_eq!(listed[0]["content"], "replying", "nothing was inserted");
+    sqlx::query("DELETE FROM permission_overwrites WHERE channel_id = $1")
+        .bind(s.channel.parse::<i64>().expect("id"))
+        .execute(&s.app.state.db)
+        .await
+        .expect("clear");
+
     // unknown reference is rejected
     let (status, _) = s.app.post(&base, &s.member, json!({"content": "x", "message_reference": {"message_id": "5"}})).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -288,6 +307,22 @@ async fn allowed_mentions_limit_who_gets_pinged() {
     assert_eq!(everyone["mention_everyone"], false);
     // the default still pings
     let (_, loud) = s.app.post(&base, &s.owner, json!({"content": "@everyone hi"})).await;
+    assert_eq!(loud["mention_everyone"], true);
+}
+
+#[tokio::test]
+async fn edits_honour_allowed_mentions() {
+    let s = setup().await;
+    let base = format!("/channels/{}/messages", s.channel);
+    let content = format!("@everyone <@{}>", s.member_id);
+    let (_, quiet) = s.app.post(&base, &s.owner, json!({"content": content, "allowed_mentions": {"parse": []}})).await;
+    let mid = quiet["id"].as_str().expect("id");
+    let (status, edited) = s.app.patch(&format!("{base}/{mid}"), &s.owner, json!({"content": format!("{content}!"), "allowed_mentions": {"parse": []}})).await;
+    assert_eq!(status, StatusCode::OK, "{edited}");
+    assert_eq!(edited["mention_everyone"], false);
+    assert_eq!(edited["mentions"], json!([]));
+    // omitted parses everything, like a send
+    let (_, loud) = s.app.patch(&format!("{base}/{mid}"), &s.owner, json!({"content": content})).await;
     assert_eq!(loud["mention_everyone"], true);
 }
 

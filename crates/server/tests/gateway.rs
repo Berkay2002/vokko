@@ -218,6 +218,26 @@ async fn resume_replays_missed_events() {
     assert_eq!(stranger.recv().await.expect("frame")["op"], 9);
 }
 
+/// A failed Resume leaves room to Identify on the same socket; a socket that keeps failing Resumes is closed 4008.
+#[tokio::test]
+async fn failed_resumes_are_capped_per_socket() {
+    let w = world().await;
+    let mut client = Client::connect(&w.address).await;
+    client.hello().await;
+    client.send(json!({"op": 6, "d": {"token": w.member, "session_id": "nope", "seq": 1}})).await;
+    assert_eq!(client.recv().await.expect("frame")["op"], 9);
+    client.send(json!({"op": 2, "d": {"token": w.member}})).await;
+    client.wait_for("READY").await;
+
+    let mut prober = Client::connect(&w.address).await;
+    prober.hello().await;
+    prober.send(json!({"op": 6, "d": "garbage"})).await;
+    prober.send(json!({"op": 6, "d": {"token": "x", "session_id": "y", "seq": 0}})).await;
+    assert_eq!(prober.recv().await.expect("frame")["op"], 9);
+    prober.send(json!({"op": 6, "d": {"token": "x", "session_id": "y", "seq": 0}})).await;
+    assert_eq!(closed_with(&mut prober).await, Some(4008));
+}
+
 /// Messages keep arriving while the resume is processed: every dispatch comes exactly once, in sequence order, RESUMED included.
 #[tokio::test]
 async fn resume_during_live_traffic_has_no_duplicates_or_reordering() {

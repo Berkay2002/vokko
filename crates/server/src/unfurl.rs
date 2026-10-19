@@ -25,6 +25,8 @@ const MAX_REDIRECTS: usize = 3;
 const MAX_URL_LEN: usize = 2048;
 const MAX_TITLE: usize = 256;
 const MAX_DESCRIPTION: usize = 350;
+/// Meta tags kept per page; real pages use a few dozen and `Head::first` only needs the first match per key.
+const MAX_META_TAGS: usize = 256;
 pub(crate) const USER_AGENT: &str = "Mozilla/5.0 (compatible; VokkoBot/0.1; link preview)";
 const ACCEPT_VALUE: &str = "text/html,application/xhtml+xml;q=0.9,image/*;q=0.8";
 
@@ -229,7 +231,8 @@ fn decode_entities(text: &str) -> String {
     while let Some(at) = rest.find('&') {
         out.push_str(&rest[..at]);
         rest = &rest[at..];
-        let decoded = rest[1..].find(';').filter(|end| *end <= 10).and_then(|end| {
+        // Look for ';' only in the next 11 bytes, so a run of bare '&' stays linear.
+        let decoded = rest.as_bytes()[1..].iter().take(11).position(|byte| *byte == b';').and_then(|end| {
             let entity = &rest[1..1 + end];
             let character = match entity {
                 "amp" => Some('&'),
@@ -374,13 +377,16 @@ fn scan_head(html: &str) -> Head {
         let name = &rest[1..name_end];
         let end = tag_end(html, start);
         match name {
-            "meta" => {
+            "meta" if head.tags.len() < MAX_META_TAGS => {
                 let attrs = parse_attrs(&html[(start + 1 + name.len()).min(end)..end]);
-                let content = attrs.iter().find(|(key, _)| key == "content").map(|(_, value)| value.clone());
-                if let Some(content) = content {
-                    for (key, value) in &attrs {
-                        if key == "property" || key == "name" {
-                            head.tags.push((value.trim().to_ascii_lowercase(), content.clone()));
+                if let Some((_, content)) = attrs.iter().find(|(key, _)| key == "content") {
+                    // At most one copy per attribute kind: repeated `name`s must not multiply `content`.
+                    for kind in ["property", "name"] {
+                        if let Some((_, value)) = attrs.iter().find(|(key, _)| key == kind) {
+                            let key = value.trim().to_ascii_lowercase();
+                            if !key.is_empty() {
+                                head.tags.push((key, content.clone()));
+                            }
                         }
                     }
                 }
@@ -821,10 +827,29 @@ mod tests {
     }
 
     #[test]
+    fn meta_tags_are_bounded() {
+        let head = scan_head(&format!("<head><meta content=\"{}\"{}></head>", "x".repeat(64 * 1024), " name".repeat(10_000)));
+        assert!(head.tags.is_empty(), "bare names carry no key");
+        let head = scan_head(&format!("<head><meta content=\"x\"{} name=a property=og:title name=b></head>", " name".repeat(10_000)));
+        assert_eq!(head.tags, [("og:title".to_owned(), "x".to_owned())]);
+        let head = scan_head(r#"<head><meta name="description" property="og:description" content="d"></head>"#);
+        assert_eq!((head.first(&["description"]), head.first(&["og:description"])), (Some("d"), Some("d")));
+        let head = scan_head(&"<meta property=og:title content=t>".repeat(1000));
+        assert_eq!(head.tags.len(), MAX_META_TAGS);
+    }
+
+    #[test]
     fn entities_and_text_cleanup() {
         assert_eq!(decode_entities("a &amp; b &lt;c&gt; &#39;d&#39; &#x1F600; &bogus; &"), "a & b <c> 'd' 😀 &bogus; &");
         assert_eq!((theme_color("#fff"), theme_color("#5865f2"), theme_color("blue"), theme_color("#12")), (Some(0xffffff), Some(0x5865f2), None, None));
         assert_eq!(clean_text("   ", 10), None);
         assert_eq!(clean_text("abcdefghij", 5).as_deref(), Some("abcd…"));
+    }
+
+    #[test]
+    fn entities_scan_a_bounded_window() {
+        assert_eq!(decode_entities("&#000000065; &#0000000065;"), "A &#0000000065;");
+        let ampersands = "&".repeat(1 << 20);
+        assert_eq!(decode_entities(&ampersands), ampersands);
     }
 }

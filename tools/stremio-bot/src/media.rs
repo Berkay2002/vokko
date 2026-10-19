@@ -27,7 +27,7 @@ use vokko_protocol::api::{StremioCue, StremioSubtitleKind};
 use crate::config::{Codec, Config, Encoder};
 use crate::plan::{self, Anchors, Choice, Desired, FfmpegPlan, Geometry, Probe};
 use crate::readahead::ReadAhead;
-use crate::report::{Kind, Reporter};
+use crate::report::Reporter;
 use crate::subs::{Budget, VttReader};
 
 const CONNECT_WAIT: Duration = Duration::from_secs(45);
@@ -270,6 +270,8 @@ pub struct Notify {
     pub reporter: Reporter,
     pub channel_id: String,
     pub duration_ms: Option<u64>,
+    /// The item (`Desired.generation`) the pipeline plays; restarts of one item (seek, track change, retry) keep it.
+    pub generation: u64,
 }
 
 /// One ffmpeg process and the tasks that move its frames into the sources.
@@ -361,7 +363,7 @@ impl Pipeline {
             let counters = counters.clone();
             move || {
                 tracing::info!(first_frame_ms = began.elapsed().as_millis() as u64, start_ms, "first video frame");
-                notify.reporter.send(&notify.channel_id, Kind::Started, start_ms, notify.duration_ms, None);
+                notify.reporter.send_started(&notify.channel_id, start_ms, notify.duration_ms, notify.generation);
                 counters.anchor(start_ms);
             }
         };

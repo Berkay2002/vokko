@@ -527,7 +527,6 @@ export function wireStoreToGateway(): void {
   });
   gateway.on("USER_UPDATE", user => {
     const state = s();
-    state.cacheUsers([user]);
     if (state.me?.id === user.id) state.setMe(user);
     // Member / recipient / relationship copies embed the user: refresh them so every view shows the new profile.
     const members = { ...state.members };
@@ -540,7 +539,8 @@ export function wireStoreToGateway(): void {
       if (channel.recipients?.some(r => r.id === user.id)) channels[id] = { ...channel, recipients: channel.recipients.map(r => (r.id === user.id ? user : r)) };
     }
     const relationships = state.relationships[user.id] ? { ...state.relationships, [user.id]: { ...state.relationships[user.id]!, user } } : state.relationships;
-    appStore.setState({ members, channels, relationships });
+    // The server sends the full User: replace the cached copy outright (cacheUsers only diffs a few fields).
+    appStore.setState({ users: { ...state.users, [user.id]: user }, members, channels, relationships });
   });
   gateway.on("PRESENCE_UPDATE", presence => appStore.setState({ presences: { ...s().presences, [presence.user_id]: presence } }));
   gateway.on("RELATIONSHIP_ADD", relationship => {

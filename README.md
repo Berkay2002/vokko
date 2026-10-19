@@ -21,7 +21,7 @@ xtask/                       dependency-layer check and privacy guard
 docs/                        API contract, architecture, self-hosting, parity roadmap
 ```
 
-The wire contract is [docs/api.md](docs/api.md). Rust types live in `crates/protocol/src/api.rs`, their TypeScript twins in `apps/desktop/src/api/types.ts`. Background: [docs/architecture.md](docs/architecture.md).
+The wire contract is [docs/api.md](docs/api.md). Rust types live in `crates/protocol/src/api.rs`, their TypeScript twins in `apps/desktop/src/api/types.ts`. Initial engine/desktop architecture (historical, with a summary of the current server): [docs/architecture.md](docs/architecture.md).
 
 ## Run it locally
 
@@ -46,7 +46,7 @@ Server configuration comes from the environment, then the nearest `.env.dev` (gi
 | `VOKKO_DATA_DIR` | `<repo>/data/server-dev` | attachments are stored in `<dir>/attachments` |
 | `VOKKO_PUBLIC_URL` | `http://<bind>` | origin used in absolute attachment URLs |
 | `VOKKO_UNFURL` | `on` | `off` disables link previews (the server then makes no outbound requests) |
-| `VOKKO_MAX_UPLOAD_MB` | `25` | largest accepted attachment, in MiB |
+| `VOKKO_MAX_UPLOAD_MB` | `500` | per-file upload limit in MiB (whole number, at least 1); values above 500, Nitro's limit, are lowered to 500 |
 | `VOKKO_TRUST_PROXY` | `off` | `on` behind a reverse proxy that appends the client address to `X-Forwarded-For` |
 | `TEST_DATABASE_URL` | tests only | server URL whose role may `CREATE DATABASE`; every test creates and drops its own `vokko_test_*` database |
 

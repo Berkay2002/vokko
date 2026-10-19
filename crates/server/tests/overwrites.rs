@@ -188,6 +188,40 @@ async fn put_and_delete_change_access_and_emit_events() {
 }
 
 #[tokio::test]
+async fn role_changes_open_and_close_channels() {
+    let w = world().await;
+    let mut alice = Client::connect(&w.address, &w.alice.0).await;
+    let guild = &w.guild;
+    let (_, role) = w.app.post(&format!("/guilds/{guild}/roles"), &w.owner, json!({"name": "insiders"})).await;
+    let role = role["id"].as_str().expect("role id").to_owned();
+    // general is private: hidden from @everyone, open to the role
+    assert_eq!(w.put(&w.general, guild, &w.owner, 0, 0, VIEW_CHANNEL).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(w.put(&w.general, &role, &w.owner, 0, VIEW_CHANNEL, 0).await.0, StatusCode::NO_CONTENT);
+    alice.wait_channel("CHANNEL_DELETE", &w.general).await;
+    let member = format!("/guilds/{guild}/members/{}", w.alice.1);
+
+    // giving and taking the role opens and closes the channel for alice
+    assert_eq!(w.app.patch(&member, &w.owner, json!({"roles": [role]})).await.0, StatusCode::OK);
+    alice.wait_channel("CHANNEL_CREATE", &w.general).await;
+    assert_eq!(w.app.patch(&member, &w.owner, json!({"roles": []})).await.0, StatusCode::OK);
+    alice.wait_channel("CHANNEL_DELETE", &w.general).await;
+
+    // deleting the role she holds closes it again
+    assert_eq!(w.app.patch(&member, &w.owner, json!({"roles": [role]})).await.0, StatusCode::OK);
+    alice.wait_channel("CHANNEL_CREATE", &w.general).await;
+    assert_eq!(w.app.delete(&format!("/guilds/{guild}/roles/{role}"), &w.owner).await.0, StatusCode::NO_CONTENT);
+    alice.wait_channel("CHANNEL_DELETE", &w.general).await;
+
+    // editing @everyone's permissions closes and reopens a channel without overwrites
+    let everyone = format!("/guilds/{guild}/roles/{guild}");
+    let hidden = (DEFAULT_EVERYONE & !VIEW_CHANNEL).to_string();
+    assert_eq!(w.app.patch(&everyone, &w.owner, json!({"permissions": hidden})).await.0, StatusCode::OK);
+    alice.wait_channel("CHANNEL_DELETE", &w.category).await;
+    assert_eq!(w.app.patch(&everyone, &w.owner, json!({"permissions": DEFAULT_EVERYONE.to_string()})).await.0, StatusCode::OK);
+    alice.wait_channel("CHANNEL_CREATE", &w.category).await;
+}
+
+#[tokio::test]
 async fn validation_and_authorisation() {
     let w = world().await;
     // alice may manage overwrites but only hands out what she has herself

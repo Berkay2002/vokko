@@ -27,7 +27,7 @@ const TICKET_SECONDS: f64 = 300.0;
 const TICKET_ATTEMPTS: i32 = 5;
 const BACKUP_CODES: usize = 10;
 const BACKUP_ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
-/// Wrong second-factor codes per account (across tickets and routes) before 429, and the window they count in.
+/// Wrong second-factor codes (or, counted apart, current passwords) per account before 429, and the window they count in.
 const MAX_FAILURES: i64 = 10;
 const FAILURE_WINDOW_SECONDS: f64 = 900.0;
 const RESET_COOLDOWN_SECONDS: f64 = 60.0;
@@ -102,30 +102,41 @@ fn backup_hash(user_id: i64, code: &str) -> Vec<u8> {
 
 /// Checks a second factor: a TOTP code (never the same 30 s step twice) or an unused backup code (used up).
 pub async fn check_code(state: &AppState, user_id: i64, code: &str) -> ApiResult<bool> {
+    let attempt = begin_attempt(state, "mfa_failures", user_id, "Too many wrong codes. Try again in 15 minutes.").await?;
+    let accepted = check_code_once(state, user_id, code).await?;
+    end_attempt(state, "mfa_failures", attempt, accepted).await?;
+    Ok(accepted)
+}
+
+/// Records an attempt in `table` (`mfa_failures` or `password_failures`) and refuses with 429 once the account has
+/// MAX_FAILURES wrong ones in the window. Pass the returned id to `end_attempt`.
+pub(super) async fn begin_attempt(state: &AppState, table: &str, user_id: i64, refused: &str) -> ApiResult<i64> {
     // record the attempt before counting: of any number of parallel requests at most MAX_FAILURES see a count in range
-    let (attempt,): (i64,) = sqlx::query_as("INSERT INTO mfa_failures (user_id) VALUES ($1) RETURNING id").bind(user_id).fetch_one(&state.db).await?;
-    let (attempts,): (i64,) = sqlx::query_as("SELECT count(*) FROM mfa_failures WHERE user_id = $1 AND failed_at > now() - make_interval(secs => $2)")
+    let (attempt,): (i64,) = sqlx::query_as(&format!("INSERT INTO {table} (user_id) VALUES ($1) RETURNING id")).bind(user_id).fetch_one(&state.db).await?;
+    let (attempts,): (i64,) = sqlx::query_as(&format!("SELECT count(*) FROM {table} WHERE user_id = $1 AND failed_at > now() - make_interval(secs => $2)"))
         .bind(user_id)
         .bind(FAILURE_WINDOW_SECONDS)
         .fetch_one(&state.db)
         .await?;
     if attempts > MAX_FAILURES {
         // a refused request is not an attempt: it must not keep extending the lockout
-        sqlx::query("DELETE FROM mfa_failures WHERE id = $1").bind(attempt).execute(&state.db).await?;
-        return Err(ApiErr {
-            status: StatusCode::TOO_MANY_REQUESTS,
-            body: ApiError { code: 0, message: "Too many wrong codes. Try again in 15 minutes.".to_owned(), errors: None },
-            retry_after: None,
-        });
+        sqlx::query(&format!("DELETE FROM {table} WHERE id = $1")).bind(attempt).execute(&state.db).await?;
+        return Err(ApiErr { status: StatusCode::TOO_MANY_REQUESTS, body: ApiError { code: 0, message: refused.to_owned(), errors: None }, retry_after: None });
     }
-    let accepted = check_code_once(state, user_id, code).await?;
+    Ok(attempt)
+}
+
+/// Settles an attempt from `begin_attempt`: a right one does not count against the limit, a wrong one stays (and old rows go).
+pub(super) async fn end_attempt(state: &AppState, table: &str, attempt: i64, accepted: bool) -> ApiResult<()> {
     if accepted {
-        // a right code does not count against the limit
-        sqlx::query("DELETE FROM mfa_failures WHERE id = $1").bind(attempt).execute(&state.db).await?;
+        sqlx::query(&format!("DELETE FROM {table} WHERE id = $1")).bind(attempt).execute(&state.db).await?;
     } else {
-        sqlx::query("DELETE FROM mfa_failures WHERE failed_at < now() - make_interval(secs => $1)").bind(FAILURE_WINDOW_SECONDS).execute(&state.db).await?;
+        sqlx::query(&format!("DELETE FROM {table} WHERE failed_at < now() - make_interval(secs => $1)"))
+            .bind(FAILURE_WINDOW_SECONDS)
+            .execute(&state.db)
+            .await?;
     }
-    Ok(accepted)
+    Ok(())
 }
 
 async fn check_code_once(state: &AppState, user_id: i64, code: &str) -> ApiResult<bool> {
