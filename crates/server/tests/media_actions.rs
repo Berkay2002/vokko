@@ -374,6 +374,23 @@ async fn automod_screens_a_forward_on_its_snapshot_and_removes_the_copies() {
 }
 
 #[tokio::test]
+async fn automod_spam_counts_repeated_forwards() {
+    let w = world().await;
+    let rule = json!({"name": "Spam", "event_type": 1, "trigger_type": 3, "actions": [{"type": 1}]});
+    let (status, body) = w.app.post(&format!("/guilds/{}/auto-moderation/rules", w.guild), &w.owner, rule).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, source) = w.say(&w.owner, &w.channel, json!({"content": "the same long text"})).await;
+    assert_eq!(status, StatusCode::OK, "{source}");
+    let reference = json!({"type": 1, "message_id": source["id"], "channel_id": w.channel});
+    for _ in 0..2 {
+        let (status, body) = w.say(&w.member, &w.channel, json!({"message_reference": reference})).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+    let (status, body) = w.say(&w.member, &w.channel, json!({"message_reference": reference})).await;
+    assert_eq!((status, body["code"].clone()), (StatusCode::BAD_REQUEST, json!(200000)), "the third forward is spam: {body}");
+}
+
+#[tokio::test]
 async fn forwarding_to_a_dm_and_forwarding_a_forward() {
     let w = world().await;
     let (bob, friend) = w.app.register("bob").await;
