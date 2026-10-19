@@ -14,7 +14,7 @@ How to read the statuses: `-` not started, `partial` some of it exists, `done` i
 
 Counts are rows by their **works the same** column, plus a last column with the rows whose **looks the same** column is `done`. They are counts, not a parity percentage.
 
-Status as of main at f7cb752c
+Status as of main at 840d8296
 
 | area | rows | done | partial | not started | n/a | looks done |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |

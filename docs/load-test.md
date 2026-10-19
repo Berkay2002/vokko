@@ -67,7 +67,7 @@ RSS peak, worst delivery ratio and error count). The top statements per scenario
 
 Machine: the shared 4-vCPU / 15 GB VPS, with Postgres 18.6, server, and generator on the same cores, while other jobs kept the
 load average between 10 and 27. Absolute numbers are therefore noisy; read the per-request CPU, query count and RSS rows, which
-are steadier than the latencies. Base is main at c77b318b; fix is this branch. Raw reports: `tools/loadtest/results/2026-10-ab/`.
+are steadier than the latencies. Base is main at b093805a; fix is this branch. Raw reports: `tools/loadtest/results/2026-10-ab/`.
 Every run delivered every event (ratio 1.000) with 0 errors and 0 limit hits.
 
 | metric (p50 / p95 ms) | base 20 | fix 20 | base 50 | fix 50 | base 200 | fix 200 | base 200 @everyone | fix 200 @everyone |
