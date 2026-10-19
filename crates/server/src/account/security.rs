@@ -357,11 +357,12 @@ pub async fn reset_password(State(state): State<AppState>, headers: HeaderMap, A
     let invalid = || ApiErr::invalid("token", "This link is invalid or has expired.");
     let Some((user_id, username, email)) = row else { return Err(invalid()) };
     rules::password(&body.password, &[&username, &email])?;
+    // hash before using up the link too: a busy server's 429 leaves the link for the retry
+    let hash = hash_password(body.password).await?;
     let Some((consumed_user, sent_to)) = tokens::consume(&state, &body.token, Purpose::Reset).await? else { return Err(invalid()) };
     if consumed_user != user_id {
         return Err(invalid());
     }
-    let hash = hash_password(body.password).await?;
     let mut tx = state.db.begin().await?;
     // the row lock orders this after any verification that moves the account; the link only counts for the address it went to
     let current: Option<(String,)> = sqlx::query_as("SELECT email FROM users WHERE id = $1 FOR UPDATE").bind(user_id).fetch_optional(&mut *tx).await?;

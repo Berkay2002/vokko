@@ -134,6 +134,11 @@ pub async fn edit_account(
         return Ok(Json(EditAccountResponse { user: current, account: before }));
     }
     confirm_identity(&state, user_id, &headers, body.password, body.code.as_deref(), false).await?;
+    // hashing can answer 429 when the server is busy, so it runs before anything is written or mailed
+    let password_hash = match body.new_password {
+        Some(new_password) => Some(hash_password(new_password).await?),
+        None => None,
+    };
     if let Some(email) = &email {
         let (taken,): (bool,) =
             sqlx::query_as("SELECT EXISTS (SELECT 1 FROM users WHERE email = $1 AND id <> $2)").bind(email).bind(user_id).fetch_one(&state.db).await?;
@@ -161,8 +166,7 @@ pub async fn edit_account(
             format!("Someone asked to change the email of your Vokko account to {email}. It changes once the new address is verified. If this wasn't you, change your password now."),
         );
     }
-    if let Some(new_password) = body.new_password {
-        let hash = hash_password(new_password).await?;
+    if let Some(hash) = password_hash {
         sqlx::query("UPDATE users SET password_hash = $2 WHERE id = $1").bind(user_id).bind(hash).execute(&state.db).await?;
         let keep = bearer_header(&headers).map(hash_token);
         revoke_sessions(&state, user_id, keep.as_deref()).await?;
