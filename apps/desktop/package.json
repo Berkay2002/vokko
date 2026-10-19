@@ -26,7 +26,7 @@
     "highlight.js": "^11.12.0",
     "livekit-client": "2.22.3",
     "lowlight": "^3.3.0",
-    "lucide-react": "^0.468.0",
+    "lucide-react": "^1.58.0",
     "qrcode-generator": "^1.4.4",
     "react": "19.3.0",
     "react-chessboard": "^5.12.1",
