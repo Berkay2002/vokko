@@ -42,10 +42,11 @@ mkdir "$tmp"
 pg pg_dump --format=custom --no-owner $(db_args) >"$tmp/db.dump"
 
 if [ -n "$URL" ]; then
-    tar -C "${VOKKO_BACKUP_DATA_DIR:?set VOKKO_BACKUP_DATA_DIR with VOKKO_BACKUP_DATABASE_URL}" --exclude=./incoming -czf "$tmp/data.tar.gz" .
+    tar -C "${VOKKO_BACKUP_DATA_DIR:?set VOKKO_BACKUP_DATA_DIR with VOKKO_BACKUP_DATABASE_URL}" --exclude=./incoming --exclude=./embed-media -czf "$tmp/data.tar.gz" .
 else
-    # The postgres:16 image is already on the machine and has GNU tar; incoming/ only holds half-finished uploads.
-    docker run --rm -v "$VOLUME:/data:ro" postgres:16 tar -C /data --exclude=./incoming -czf - . >"$tmp/data.tar.gz"
+    # The postgres:16 image is already on the machine and has GNU tar; incoming/ only holds half-finished uploads and
+    # embed-media/ is the disposable link-preview cache.
+    docker run --rm -v "$VOLUME:/data:ro" postgres:16 tar -C /data --exclude=./incoming --exclude=./embed-media -czf - . >"$tmp/data.tar.gz"
 fi
 
 # Verify: the dump's table of contents must list table data, and the archive must read to the end.

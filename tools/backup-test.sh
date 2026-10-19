@@ -26,9 +26,10 @@ psql "$url" -q -v ON_ERROR_STOP=1 -c "create table backup_probe (id bigint prima
     insert into backup_probe select g, sha256(g::text::bytea) from generate_series(1, 5000) g;
     insert into users (id, username, email, password_hash) select g, 'u' || g, g || '@test', 'x' from generate_series(1, 50) g;
     insert into guilds (id, name, owner_id) select g, 'guild ' || g, g from generate_series(1, 10) g;"
-mkdir -p "$work/data/attachments/1" "$work/data/incoming"
+mkdir -p "$work/data/attachments/1" "$work/data/incoming" "$work/data/embed-media"
 head -c 100000 /dev/urandom >"$work/data/attachments/1/a.bin"
 echo partial >"$work/data/incoming/skip-me"
+echo cached >"$work/data/embed-media/skip-me"
 
 before=$(counts)
 export VOKKO_BACKUP_DATABASE_URL=$url VOKKO_BACKUP_DATA_DIR=$work/data VOKKO_BACKUP_DIR=$work/backups VOKKO_BACKUP_DAILY=2
@@ -56,4 +57,5 @@ after=$(counts)
 [ "$before" = "$after" ] || { diff <(echo "$before") <(echo "$after") >&2; echo "FAIL: row counts differ" >&2; exit 1; }
 [ "$(cksum <"$work/data/attachments/1/a.bin")" = "$sum" ] || { echo "FAIL: attachment differs" >&2; exit 1; }
 [ ! -e "$work/data/incoming" ] || { echo "FAIL: incoming/ was backed up" >&2; exit 1; }
+[ ! -e "$work/data/embed-media" ] || { echo "FAIL: embed-media/ was backed up" >&2; exit 1; }
 echo "PASS: $(echo "$after" | wc -l) tables, $(echo "$after" | awk -F'|' '{s += $2} END {print s}') rows and the uploads restored"
