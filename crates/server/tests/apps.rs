@@ -726,6 +726,48 @@ async fn interaction_responses_ping_everyone_only_with_the_bots_permission() {
 }
 
 #[tokio::test]
+async fn edits_rewrite_role_mentions() {
+    let app = TestApp::new().await;
+    let address = app.serve().await;
+    let (owner, _) = app.register("owner").await;
+    let (member, member_user) = app.register("member").await;
+    let (guild, channel) = app.guild_with_channel(&owner).await;
+    join(&app, &owner, &channel, &member).await;
+    let (_, role) = app.post(&format!("/guilds/{guild}/roles"), &owner, json!({"name": "docs", "mentionable": true})).await;
+    let role = id(&role);
+    let (status, _) = app.patch(&format!("/guilds/{guild}/members/{}", id(&member_user)), &owner, json!({"roles": [role]})).await;
+    assert_eq!(status, StatusCode::OK);
+    let (app_id, bot) = create_app(&app, &owner, "Echo").await;
+    let commands = echo_commands(&app, &bot, &app_id).await;
+    add_bot(&app, &owner, &app_id, &guild).await;
+    let mut bot_gateway = Client::connect(&address, &bot).await;
+
+    // a deferred response filled in by editing @original pings the role
+    invoke(&app, &owner, &app_id, &channel, command(&commands, "echo"), json!([{"name": "text", "type": 3, "value": "x"}])).await;
+    let interaction = bot_gateway.wait_for("INTERACTION_CREATE").await;
+    let token = interaction["token"].as_str().expect("token").to_owned();
+    let (status, _) = app.send(Method::POST, &format!("/interactions/{}/{token}/callback", id(&interaction)), None, Some(json!({"type": 5}))).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let original = format!("/webhooks/{app_id}/{token}/messages/@original");
+    let (status, edited) = app.send(Method::PATCH, &original, None, Some(json!({"content": format!("<@&{role}> done")}))).await;
+    assert_eq!(status, StatusCode::OK, "{edited}");
+    assert_eq!(edited["mention_roles"], json!([role]));
+    let (_, inbox) = app.get("/users/@me/mentions", &member).await;
+    assert_eq!(inbox[0]["id"], edited["id"], "{inbox}");
+
+    // a webhook edit that drops the role mention drops the ping
+    let (_, hook) = app.post(&format!("/channels/{channel}/webhooks"), &owner, json!({"name": "Alerts"})).await;
+    let base = format!("/webhooks/{}/{}", id(&hook), hook["token"].as_str().expect("token"));
+    let (_, message) = app.send(Method::POST, &format!("{base}?wait=true"), None, Some(json!({"content": format!("<@&{role}> news")}))).await;
+    assert_eq!(message["mention_roles"], json!([role]));
+    let (status, edited) = app.send(Method::PATCH, &format!("{base}/messages/{}", id(&message)), None, Some(json!({"content": "news"}))).await;
+    assert_eq!(status, StatusCode::OK, "{edited}");
+    assert_eq!(edited["mention_roles"], json!([]));
+    let (_, inbox) = app.get("/users/@me/mentions", &member).await;
+    assert!(!inbox.as_array().expect("mentions").iter().any(|mention| mention["id"] == message["id"]), "{inbox}");
+}
+
+#[tokio::test]
 async fn webhook_and_bot_embeds_follow_discords_limits() {
     let app = TestApp::new().await;
     let (owner, _) = app.register("owner").await;
