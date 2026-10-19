@@ -320,9 +320,18 @@ export function accountInfo(account: MockAccount): AccountInfo {
   return { email: account.email, pending_email: state.pending_email, verified: state.email_verified, has_password: state.has_password, mfa_enabled: state.mfa_secret !== null };
 }
 
+const passwordFailures = new Map<string, number[]>();
+
+/** Like the server: wrong current passwords count per account apart from codes (10 in 15 minutes, then 429 even for the right one); a missing one is refused without counting. */
 export function confirmPassword(account: MockAccount, password: unknown): void {
   if (!accountState(account.user.id).has_password) return;
-  if (typeof password !== "string" || password !== account.password) invalid("password", "Password does not match.");
+  if (typeof password !== "string" || password === "") invalid("password", "Password does not match.");
+  const recent = (passwordFailures.get(account.user.id) ?? []).filter(at => Date.now() - at < 15 * 60_000);
+  if (recent.length >= 10) fail(429, 0, "Too many wrong passwords. Try again in 15 minutes.");
+  if (password !== account.password) {
+    passwordFailures.set(account.user.id, [...recent, Date.now()]);
+    invalid("password", "Password does not match.");
+  }
 }
 
 /** token → when it last signed in or re-confirmed through a provider */

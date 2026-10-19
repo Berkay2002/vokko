@@ -106,6 +106,22 @@ describe("interactions", () => {
     expect((call("plain", "GET", `/channels/${general}/messages`) as Message[]).some(m => m.id === message.id)).toBe(false);
   });
 
+  it("needs a channel the caller may send in, like the server: a category, a forum or a locked thread is refused", () => {
+    const { app, commands } = setupBot();
+    grantCommandsToEveryone();
+    const echo = commands.find(c => c.name === "echo")!;
+    const invoke = (who: string, channel_id: string) => () =>
+      call(who, "POST", "/interactions", { type: 2, application_id: app.id, channel_id, data: { id: echo.id, name: "echo", type: 1, options: [{ name: "text", type: 3, value: "x" }] } });
+    const category = (call("owner", "POST", `/guilds/${guildId}/channels`, { name: "cat", type: 4 }) as { id: string }).id;
+    const forum = (call("owner", "POST", `/guilds/${guildId}/channels`, { name: "forum", type: 15 }) as { id: string }).id;
+    const thread = (call("owner", "POST", `/channels/${general}/threads`, { name: "t", type: 11 }) as { id: string }).id;
+    call("owner", "PATCH", `/channels/${thread}`, { locked: true });
+    expect(errorOf(invoke("plain", category))).toEqual({ status: 400, code: 50035 });
+    expect(errorOf(invoke("plain", forum))).toEqual({ status: 400, code: 50024 });
+    expect(errorOf(invoke("plain", thread))).toEqual({ status: 403, code: 160005 });
+    invoke("owner", thread)();
+  });
+
   it("a public answer and a followup go to the channel; an unanswered interaction fails after 3 s", () => {
     vi.useFakeTimers();
     try {

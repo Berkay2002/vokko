@@ -34,6 +34,7 @@ import { db, nextId, sortedMessages, userOf, type MockChannel, type MockMessage 
 import { addMessage, channelAudience, createAccount, fail, guildAudience, requireChannel, requireGuildMember, requireGuildPerm, MISSING_PERMISSIONS } from "./ops";
 import { ID, route, str, type Ctx } from "./router";
 import { emit } from "./socket";
+import { canManageThreads } from "./threads";
 import { guildPayload, membersOf, messageFor } from "./views";
 
 export interface MockApp {
@@ -541,6 +542,10 @@ route("POST", "/interactions", ctx => {
   if (kind !== InteractionType.ApplicationCommand && kind !== InteractionType.ApplicationCommandAutocomplete) invalid("type", "Must be 2, 3 or 4.");
   const autocomplete = kind === InteractionType.ApplicationCommandAutocomplete;
   const channel = requireChannel(str(body.channel_id) ?? "", ctx.viewer.user.id);
+  // Like the server: the response lands here as a message, so the channel must take one from the caller.
+  if (channel.type === ChannelType.GuildCategory) invalid("channel_id", "Cannot send messages in a category.");
+  if (channel.type === ChannelType.GuildForum) fail(400, 50024, "Cannot execute action on this channel type");
+  if (channel.thread_metadata?.locked && !canManageThreads(channel, ctx.viewer.user.id)) fail(403, 160005, "Thread is locked");
   const data = (body.data ?? {}) as { id?: string; type?: ApplicationCommandType; options?: InteractionDataOption[]; target_id?: string };
   const { commands } = usableCommands(channel, ctx.viewer.user.id);
   const command = commands.find(c => c.id === data.id && c.application_id === str(body.application_id));
