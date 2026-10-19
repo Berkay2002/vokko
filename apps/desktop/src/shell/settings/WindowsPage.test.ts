@@ -4,6 +4,7 @@ import { desktopSettingsTitle, osName, updateSummary } from "./WindowsPage";
 describe("updateSummary", () => {
   it("says what the updater is doing", () => {
     expect(updateSummary({ state: "disabled" }, null)).toMatch(/not set up for this build/);
+    expect(updateSummary({ state: "packageManager" }, "0.1.0")).toMatch(/package manager/);
     expect(updateSummary({ state: "checking" }, "0.1.0")).toBe("Checking for updates…");
     expect(updateSummary({ state: "available", version: "0.2.0", notes: null }, "0.1.0")).toBe("Vokko 0.2.0 is available.");
     expect(updateSummary({ state: "downloading", version: "0.2.0", downloaded: 512, total: 2048 }, "0.1.0")).toBe("Downloading Vokko 0.2.0 (25%)…");

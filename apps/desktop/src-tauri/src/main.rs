@@ -215,7 +215,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .manage(window_state::WindowStateStore::load(config_dir.map(|dir| dir.join("window.json"))))
         .manage(tray::TrayState::default())
         .manage(links::LinkState::default())
-        .manage(updates::UpdateState::new(updater_configured))
+        .manage(updates::UpdateState::new(updates::initial_status(updater_configured, cfg!(target_os = "linux") && std::env::var_os("APPIMAGE").is_none())))
         .manage(shortcuts::ShortcutRegistry::default())
         .manage(overlay::OverlayState::default())
         .on_window_event(|window, event| {

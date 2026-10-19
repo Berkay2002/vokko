@@ -111,6 +111,8 @@ Everything macOS-specific is in `src-tauri/src/macos.rs` (`#[cfg(target_os = "ma
 
 x86_64 only, built on the Windows PC in a WSL 2 distro (GitHub Actions is not available). Downloads: `Vokko-linux.AppImage` (what
 the updater installs, `linux-x86_64` in `latest.json`) and `Vokko-linux.deb`, next to the versioned `Vokko_<v>_amd64.*` files.
+A .deb install (Linux without `$APPIMAGE`) never checks for updates: its status is `packageManager` and Settings tells the user
+to update through their package manager or the newer .deb.
 The release overlay's `targets` stays `["nsis"]`; Linux passes `--bundles appimage,deb` the way macOS passes `app,dmg`.
 
 - Platform code: the process list (`games.rs`, `streamer.rs`) reads `/proc`; app info gives the executable name with no icon;

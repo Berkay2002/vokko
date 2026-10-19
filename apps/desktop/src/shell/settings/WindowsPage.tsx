@@ -22,6 +22,8 @@ export function updateSummary(status: UpdateStatus, version: string | null): str
   switch (status.state) {
     case "disabled":
       return "Updates are not set up for this build. Install a newer build yourself, or ask whoever hosts Vokko for one.";
+    case "packageManager":
+      return "Vokko was installed as a .deb package. Update it through your package manager, or install the newer .deb from the download page.";
     case "checking":
       return "Checking for updates…";
     case "available":
@@ -71,7 +73,7 @@ function UpdatesCategory() {
           <button type="button" className="sm-btn primary" onClick={() => void restart()}>
             Restart to Update
           </button>
-        ) : status.state !== "disabled" ? (
+        ) : status.state !== "disabled" && status.state !== "packageManager" ? (
           <button type="button" className="sm-btn" disabled={busy} onClick={() => void checkForUpdate()}>
             {status.state === "error" ? "Try Again" : "Check for Updates"}
           </button>
