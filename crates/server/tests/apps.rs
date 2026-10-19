@@ -726,6 +726,40 @@ async fn interaction_responses_ping_everyone_only_with_the_bots_permission() {
 }
 
 #[tokio::test]
+async fn commands_run_only_where_the_caller_may_send() {
+    let app = TestApp::new().await;
+    let address = app.serve().await;
+    let (owner, _) = app.register("owner").await;
+    let (member, _) = app.register("member").await;
+    let (guild, channel) = app.guild_with_channel(&owner).await;
+    join(&app, &owner, &channel, &member).await;
+    let (app_id, bot) = create_app(&app, &owner, "Echo").await;
+    let commands = echo_commands(&app, &bot, &app_id).await;
+    add_bot(&app, &owner, &app_id, &guild).await;
+    let _bot_gateway = Client::connect(&address, &bot).await;
+    let echo = command(&commands, "echo");
+    let text = json!([{"name": "text", "type": 3, "value": "hi"}]);
+
+    let (_, category) = app.post(&format!("/guilds/{guild}/channels"), &owner, json!({"type": 4, "name": "cat"})).await;
+    let (status, error) = invoke(&app, &member, &app_id, &id(&category), echo, text.clone()).await;
+    assert_eq!((status, error["code"].as_u64()), (StatusCode::BAD_REQUEST, Some(50035)), "{error}");
+    let (_, forum) = app.post(&format!("/guilds/{guild}/channels"), &owner, json!({"type": 15, "name": "help"})).await;
+    let (status, error) = invoke(&app, &member, &app_id, &id(&forum), echo, text.clone()).await;
+    assert_eq!((status, error["code"].as_u64()), (StatusCode::BAD_REQUEST, Some(50024)), "{error}");
+
+    // a locked thread takes commands only from members with MANAGE_THREADS
+    let (status, thread) = app.post(&format!("/channels/{channel}/threads"), &owner, json!({"name": "t"})).await;
+    assert_eq!(status, StatusCode::OK, "{thread}");
+    let thread = id(&thread);
+    let (status, body) = app.patch(&format!("/channels/{thread}"), &owner, json!({"locked": true})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, error) = invoke(&app, &member, &app_id, &thread, echo, text.clone()).await;
+    assert_eq!((status, error["code"].as_u64()), (StatusCode::FORBIDDEN, Some(160005)), "{error}");
+    let (status, body) = invoke(&app, &owner, &app_id, &thread, echo, text).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+#[tokio::test]
 async fn edits_rewrite_role_mentions() {
     let app = TestApp::new().await;
     let address = app.serve().await;

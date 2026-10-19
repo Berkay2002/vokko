@@ -217,6 +217,11 @@ async fn invoke(
     };
     let channel_id = body.channel_id.db();
     let access = channel_access(&state, user_id, channel_id).await?;
+    // The response lands in this channel as a message, so the channel must take one from the caller (like create_message).
+    if access.channel.channel_type() == vokko_protocol::api::ChannelType::GuildCategory {
+        return Err(ApiErr::invalid("channel_id", "Cannot send messages in a category."));
+    }
+    crate::threads::check_send(&access)?;
     let (_, commands) = apps::usable_commands(&state, user_id, &access).await?;
     let command = commands.into_iter().find(|command| command.id == data_id.db() && command.application_id == body.application_id.db());
     let Some(command) = command else {
