@@ -84,6 +84,24 @@ jobs:
         working-directory: apps/desktop
         run: npm test
 
+  audit:
+    # Advisory only: new advisories appear without any change here and would block unrelated PRs, and the current
+    # ones (boardgame.io's server-side koa/socket.io deps, which the client never runs) have no non-breaking fix.
+    # Read the job log; Dependabot opens the update PRs.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        with:
+          tool: cargo-audit
+      - name: cargo audit
+        run: cargo audit
+      - name: npm audit
+        if: always()
+        run: npm audit --omit=dev --audit-level=high
+
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 30
