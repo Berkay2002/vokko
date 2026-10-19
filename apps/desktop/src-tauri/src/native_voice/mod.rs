@@ -441,11 +441,17 @@ impl Session {
         }
     }
 
-    fn restart_playback(&mut self, shared: &Arc<Shared>) {
-        // The microphone's dsp thread is fed by the speakers: reopen both so the echo canceller keeps its reference.
+    /// Stops the microphone and takes its track off the room (the capture goes with it).
+    async fn unpublish_mic(&mut self) {
         if let Some(mic) = self.mic.take() {
             mic.pump.abort();
+            let _ = self.room.local_participant().unpublish_track(&mic.publication.sid()).await;
         }
+    }
+
+    /// Callers unpublish the microphone first: its dsp thread is fed by the speakers, so both reopen to keep the echo
+    /// canceller's reference.
+    fn restart_playback(&mut self, shared: &Arc<Shared>) {
         self.playback = match audio::start_playback(&self.settings.output_device_id, shared.clone()) {
             Ok(playback) => Some(playback),
             Err(error) => {
@@ -640,6 +646,7 @@ async fn apply_settings(state: &NativeVoice, settings: VoiceSettings) -> Result<
     session.settings = settings;
     if output_changed {
         let had_mic = session.mic.is_some();
+        session.unpublish_mic().await;
         session.restart_playback(&state.shared);
         if had_mic {
             republish_mic(session, &state.shared).await;
@@ -652,10 +659,7 @@ async fn apply_settings(state: &NativeVoice, settings: VoiceSettings) -> Result<
 
 /// A new microphone device: unpublish the old track and publish one from the new device (keeps the mute).
 async fn republish_mic(session: &mut Session, shared: &Arc<Shared>) {
-    if let Some(mic) = session.mic.take() {
-        mic.pump.abort();
-        let _ = session.room.local_participant().unpublish_track(&mic.publication.sid()).await;
-    }
+    session.unpublish_mic().await;
     let muted = shared.muted.load(Ordering::Relaxed);
     if !muted {
         session.publish_mic(shared).await;
@@ -744,7 +748,7 @@ mod tests {
     use tauri::Manager;
 
     /// Live check against a LiveKit server (the VPS harness, docs/desktop-release.md): `NATIVE_VOICE_URL`, `NATIVE_VOICE_TOKEN`,
-    /// optional `NATIVE_VOICE_SCRIPT` = "secs:action,..." (mute, unmute, deaf, undeaf, vol0, vol1:<user>) and `NATIVE_VOICE_SECS`.
+    /// optional `NATIVE_VOICE_SCRIPT` = "secs:action,..." (mute, unmute, deaf, undeaf, vol0, vol1:<user>, output=<device>) and `NATIVE_VOICE_SECS`.
     /// Default settings, with `NATIVE_VOICE_SETTINGS` (a JSON object of VoiceSettings fields) on top.
     fn test_init() -> ConnectInit {
         let mut settings = serde_json::json!({
@@ -804,6 +808,18 @@ mod tests {
                     let kind = if source == "camera" { Kind::Camera } else { Kind::Screen };
                     let plan = plan.map(|p| serde_json::from_value(p).unwrap());
                     println!("{source}: {:?}", set_video(&voice, kind, plan).await);
+                }
+                // Switch speakers (apply_settings): exactly one microphone publication afterwards, none while muted.
+                ("output", device) => {
+                    let mut settings = test_init().settings;
+                    settings.output_device_id = device.to_string();
+                    apply_settings(&voice, settings).await.unwrap();
+                    let slot = voice.session.lock().await;
+                    let session = slot.as_ref().unwrap();
+                    let publications = session.room.local_participant().track_publications();
+                    let mics = publications.values().filter(|p| p.source() == TrackSource::Microphone).count();
+                    println!("output {device}: {mics} microphone publication(s)");
+                    assert_eq!(mics, usize::from(session.mic.is_some()));
                 }
                 // The room goes away under the session (what a non-final disconnect looks like before the page retries).
                 ("drop", _) => {
