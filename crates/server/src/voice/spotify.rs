@@ -70,7 +70,6 @@ pub struct Session {
     track_seq: u64,
     /// `seq` of the last change that moved the position (track, pause, resume, seek): older `position` events are stale.
     steer_seq: u64,
-    token: String,
     paused_since: Option<Instant>,
     /// Nothing is left to play since then.
     idle_since: Option<Instant>,
@@ -229,7 +228,9 @@ impl Session {
         Some(Desired {
             channel_id: self.channel_id.to_string(),
             livekit_url: cfg.bot_media_url.clone(),
-            token: self.token.clone(),
+            // Minted for every PUT: the bot joins with the token of whichever PUT opens its session, and that can come long after
+            // the start (a rejoin after an error, an idle spell or a bot restart), so a token kept from the start would expire.
+            token: bot_token(state, self.channel_id, &self.room)?,
             track: track.uri.clone(),
             next: self.queue.upcoming().map(|next| next.uri.clone()),
             position_ms: self.here(now_ms),
@@ -488,7 +489,6 @@ async fn start(State(state): State<AppState>, actor: Actor, Path(id): Path<Strin
             let room = new_room(channel_id);
             Session {
                 channel_id,
-                token: bot_token(&state, channel_id, &room).unwrap_or_default(),
                 room,
                 started_by: user_id,
                 control: control::new_session(actor, &control::room(&state, channel_id)),
@@ -511,7 +511,7 @@ async fn start(State(state): State<AppState>, actor: Actor, Path(id): Path<Strin
                 bot_down_since: None,
             }
         });
-        if session.token.is_empty() {
+        if fresh && bot_token(&state, channel_id, &session.room).is_none() {
             *slot = None;
             return Err(ApiErr::internal());
         }
