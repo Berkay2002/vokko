@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
-# The workspace lints, except unsafe code is "deny" here (not "forbid") so the one WebView2 call in window.rs can opt in.
+# The workspace lints, except unsafe code is "deny" here (not "forbid") so a few Win32/WebView2 calls can opt in with #[allow(unsafe_code)]: window.rs, overlay.rs, popout.rs, sharebar.rs and appinfo/win.rs.
 [lints.rust]
 unsafe_code = "deny"
 

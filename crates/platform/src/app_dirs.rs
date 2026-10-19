@@ -1,12 +1,13 @@
-//! Where the desktop app keeps its per-user data: preferences, brush presets, crash-recovery
-//! autosaves and the GPU startup marker all live under the one directory [`config_dir`] returns.
+//! Where the desktop app keeps its per-user data: preferences, window state, the crash marker and
+//! the logs all live under the one directory [`config_dir`] returns.
 //!
 //! In order:
 //! 1. `VOKKO_CONFIG_DIR`, when set (tests, agents, custom setups).
-//! 2. **Portable mode** (#228): a marker file ([`PORTABLE_MARKERS`]) beside the executable puts
+//! 2. **Portable mode**: a marker file ([`PORTABLE_MARKERS`]) beside the executable puts
 //!    everything in `<exe dir>/VokkoData`, so a portable copy on a USB stick leaves nothing in
-//!    `%APPDATA%`. The Windows portable zip ships with `portable.txt`; the MSI doesn't. If that
-//!    folder can't be written (read-only medium, Program Files), the app warns and falls back.
+//!    `%APPDATA%`. The NSIS installer creates no marker; a portable copy needs one added by
+//!    hand. If that folder can't be written (read-only medium, Program Files), the app warns and
+//!    falls back.
 //! 3. The platform convention: macOS `~/Library/Application Support/Vokko`, Windows
 //!    `%APPDATA%\Vokko`, Linux `$XDG_CONFIG_HOME/vokko` or `~/.config/vokko`.
 
