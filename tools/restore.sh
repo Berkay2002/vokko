@@ -5,6 +5,7 @@
 #
 # Uses the same environment as backup.sh (VOKKO_BACKUP_COMPOSE_DIR, VOKKO_BACKUP_DATA_VOLUME, or
 # VOKKO_BACKUP_DATABASE_URL + VOKKO_BACKUP_DATA_DIR). With compose it stops the server, restores, and starts it again.
+# Without compose (VOKKO_BACKUP_DATABASE_URL), stop the server yourself first and start it afterwards; the script can't.
 set -euo pipefail
 
 src=${1:?usage: restore.sh <backup dir> --yes}

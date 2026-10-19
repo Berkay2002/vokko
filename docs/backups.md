@@ -77,8 +77,10 @@ tools/restore.sh <backup dir>/daily/<stamp> --yes
 
 It checks both files first, stops `server`, drops and recreates the `vokko` database (so tables from a newer migration don't
 survive next to the old ones), `pg_restore --single-transaction --exit-on-error`, replaces the volume's contents (owner
-kept, uid 10001), and starts `server` again. Restore with the server image the backup came from or newer: a newer server
-runs its migrations on start, an older one doesn't know the newer tables.
+kept, uid 10001), and starts `server` again. Stopping and starting `server` happens only in compose mode: with
+`VOKKO_BACKUP_DATABASE_URL` and `VOKKO_BACKUP_DATA_DIR`, stop the server yourself before running the script and start it
+afterwards, or it writes to the new database and data dir while they are being restored. Restore with the server image
+the backup came from or newer: a newer server runs its migrations on start, an older one doesn't know the newer tables.
 
 Test a restore before you rely on it: `tools/backup-test.sh` with `VOKKO_TEST_ADMIN_URL=postgres://user:pass@host/postgres`
 (a user with CREATEDB) does the whole loop against `vokko_test_backup` and drops it again.
