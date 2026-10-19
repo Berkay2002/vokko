@@ -147,8 +147,14 @@ jobs:
         run: npm audit --omit=dev --audit-level=high
 
   e2e:
+    # One worker runs the whole suite in about 31 minutes, so it is split by spec file into four shards (each with its own
+    # dev server); a failing shard does not cancel the others.
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -162,12 +168,12 @@ jobs:
       # Runs against the in-memory mock (VITE_VOKKO_API unset); the playwright config starts the dev server itself.
       - name: e2e
         working-directory: apps/desktop
-        run: npm run e2e
+        run: npm run e2e -- --shard=${{ matrix.shard }}/4
       - name: upload report
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.shard }}
           path: |
             apps/desktop/test-results/
             apps/desktop/playwright-report/
