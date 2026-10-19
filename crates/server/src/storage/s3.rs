@@ -6,11 +6,13 @@ use std::path::Path;
 use std::time::Duration;
 
 use axum::body::{Body, Bytes};
+use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
 use hmac::{Hmac, Mac};
 use reqwest::{Method, StatusCode, Url};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
+use tokio::io::AsyncWriteExt;
 
 use super::{DEFAULT_PRESIGN_TTL, MAX_PRESIGN_TTL, Object, Presign, Storage};
 use crate::config::DotEnv;
@@ -196,6 +198,15 @@ impl S3Storage {
     }
 }
 
+/// A spool file removed when this is dropped: on success, on every error path and when the copy future is dropped.
+struct TempFile(std::path::PathBuf);
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 /// A request body with the SHA-256 the signature covers.
 struct Payload {
     hash: String,
@@ -239,7 +250,8 @@ impl Storage for S3Storage {
         Box::pin(async move { self.get(id).await?.bytes().await.map_err(io::Error::other) })
     }
 
-    /// Server-side CopyObject; a provider that refuses it gets a download and re-upload instead.
+    /// Server-side CopyObject; a provider that refuses it gets a download to a temp file and a re-upload instead, so a large
+    /// object never sits in memory.
     fn copy(&self, from: i64, to: i64) -> BoxFuture<'_, io::Result<()>> {
         Box::pin(async move {
             let source = format!("/{}/{}{from}", self.config.bucket, self.config.prefix);
@@ -252,8 +264,15 @@ impl Storage for S3Storage {
             if status.is_success() && !response.text().await.unwrap_or_default().contains("<Error>") {
                 return Ok(());
             }
-            let bytes = self.read(from).await?;
-            self.put_bytes(to, bytes).await
+            let mut chunks = self.get(from).await?.bytes_stream();
+            let spool = TempFile(std::env::temp_dir().join(format!("vokko-s3-copy-{}", crate::auth::random_hex(6))));
+            let mut file = tokio::fs::File::create(&spool.0).await?;
+            while let Some(chunk) = chunks.next().await {
+                file.write_all(&chunk.map_err(io::Error::other)?).await?;
+            }
+            file.flush().await?;
+            drop(file);
+            self.put_path(to, &spool.0).await
         })
     }
 
@@ -476,35 +495,83 @@ mod tests {
     }
 
     /// A one-request HTTP server on a thread: returns the request head (lower-cased) and body.
-    fn capture_one_request() -> (String, std::thread::JoinHandle<(String, Vec<u8>)>) {
+    fn capture_one_request() -> (String, std::thread::JoinHandle<Request>) {
+        let (endpoint, handle) = serve(vec![("200 OK", Vec::new())]);
+        (endpoint, std::thread::spawn(move || handle.join().expect("server").remove(0)))
+    }
+
+    /// A request head (lower-cased) and its body.
+    type Request = (String, Vec<u8>);
+
+    /// An HTTP server on a thread answering one request per connection with `responses` in order: returns each request
+    /// head (lower-cased) and body.
+    fn serve(responses: Vec<(&'static str, Vec<u8>)>) -> (String, std::thread::JoinHandle<Vec<Request>>) {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         let endpoint = format!("http://{}", listener.local_addr().expect("addr"));
         let handle = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("accept");
-            let mut received = Vec::new();
-            let mut chunk = [0u8; 64 * 1024];
-            let head_end = loop {
-                let read = stream.read(&mut chunk).expect("read");
-                assert!(read > 0, "connection closed before the headers ended");
-                received.extend_from_slice(&chunk[..read]);
-                if let Some(at) = received.windows(4).position(|window| window == b"\r\n\r\n") {
-                    break at + 4;
+            let mut requests = Vec::new();
+            for (status, response) in responses {
+                let (mut stream, _) = listener.accept().expect("accept");
+                let mut received = Vec::new();
+                let mut chunk = [0u8; 64 * 1024];
+                let head_end = loop {
+                    let read = stream.read(&mut chunk).expect("read");
+                    assert!(read > 0, "connection closed before the headers ended");
+                    received.extend_from_slice(&chunk[..read]);
+                    if let Some(at) = received.windows(4).position(|window| window == b"\r\n\r\n") {
+                        break at + 4;
+                    }
+                };
+                let head = String::from_utf8_lossy(&received[..head_end]).to_lowercase();
+                let length: usize =
+                    head.lines().find_map(|line| line.strip_prefix("content-length:")).map(|value| value.trim().parse().expect("length")).unwrap_or(0);
+                let mut body = received[head_end..].to_vec();
+                while body.len() < length {
+                    let read = stream.read(&mut chunk).expect("read");
+                    assert!(read > 0, "connection closed before the body ended");
+                    body.extend_from_slice(&chunk[..read]);
                 }
-            };
-            let head = String::from_utf8_lossy(&received[..head_end]).to_lowercase();
-            let length: usize =
-                head.lines().find_map(|line| line.strip_prefix("content-length:")).map(|value| value.trim().parse().expect("length")).unwrap_or(0);
-            let mut body = received[head_end..].to_vec();
-            while body.len() < length {
-                let read = stream.read(&mut chunk).expect("read");
-                assert!(read > 0, "connection closed before the body ended");
-                body.extend_from_slice(&chunk[..read]);
+                let reply = format!("HTTP/1.1 {status}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n", response.len());
+                stream.write_all(reply.as_bytes()).expect("respond");
+                stream.write_all(&response).expect("respond");
+                requests.push((head, body));
             }
-            stream.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n").expect("respond");
-            (head, body)
+            requests
         });
         (endpoint, handle)
+    }
+
+    #[tokio::test]
+    async fn copy_falls_back_to_a_spooled_download_and_upload() {
+        let contents: Vec<u8> = (0..700_000u32).map(|i| (i % 251) as u8).collect();
+        let (endpoint, server) = serve(vec![("501 Not Implemented", Vec::new()), ("200 OK", contents.clone()), ("200 OK", Vec::new())]);
+        let config = S3Config {
+            endpoint,
+            bucket: "vokko".to_owned(),
+            region: "auto".to_owned(),
+            access_key_id: "id".to_owned(),
+            secret_access_key: "secret".to_owned(),
+            prefix: "attachments/".to_owned(),
+            presign_ttl: None,
+        };
+        let spools = || {
+            std::fs::read_dir(std::env::temp_dir())
+                .expect("temp dir")
+                .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+                .filter(|name| name.starts_with("vokko-s3-copy-"))
+                .collect::<std::collections::HashSet<_>>()
+        };
+        let before = spools();
+        S3Storage::new(config).copy(3, 9).await.expect("copy");
+        let requests = server.join().expect("server");
+        assert!(requests[0].0.starts_with("put /vokko/attachments/9 http/1.1"), "{}", requests[0].0);
+        assert!(requests[0].0.contains("x-amz-copy-source: /vokko/attachments/3"), "{}", requests[0].0);
+        assert!(requests[1].0.starts_with("get /vokko/attachments/3 http/1.1"), "{}", requests[1].0);
+        assert!(requests[2].0.starts_with("put /vokko/attachments/9 http/1.1"), "{}", requests[2].0);
+        assert!(requests[2].0.contains(&format!("content-length: {}", contents.len())), "{}", requests[2].0);
+        assert_eq!(requests[2].1, contents);
+        assert!(spools().is_subset(&before), "the spool file is removed");
     }
 
     #[tokio::test]

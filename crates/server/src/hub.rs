@@ -5,7 +5,7 @@
 //! overflow) travel on a separate signal so they never wait behind queued frames.
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::IpAddr;
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -13,8 +13,11 @@ use serde_json::Value;
 use tokio::sync::{Notify, mpsc};
 use vokko_protocol::api::{Activity, GatewayEvent};
 
-/// Close code for a connection that was replaced by a newer one of the same session.
+/// Close code for a connection that was replaced by a newer one of the same session, or by a new session of a user at the cap.
 pub const CLOSE_REPLACED: u16 = 4000;
+/// Gateway sessions one user may hold; an Identify beyond it forgets the oldest (see `Hub::open_session`).
+pub const MAX_USER_SESSIONS: usize = 16;
+pub const MAX_BOT_SESSIONS: usize = 64;
 /// Close code for a connection whose outgoing queue overflowed ("try again later": resume with the last sequence).
 pub const CLOSE_SLOW_CONSUMER: u16 = 1013;
 
@@ -113,6 +116,8 @@ struct SessionInner {
 pub struct Session {
     pub id: String,
     pub user_id: i64,
+    /// Creation order within the hub: the lowest is the oldest.
+    serial: u64,
     /// SHA-256 of the token the session was identified with; logout of that token ends the session.
     token_hash: Vec<u8>,
     capacity: usize,
@@ -244,6 +249,7 @@ pub struct Hub {
     activities: Mutex<HashMap<i64, Vec<SessionActivities>>>,
     identifies: Mutex<HashMap<i64, (Instant, u32)>>,
     preauth: Mutex<HashMap<IpAddr, usize>>,
+    next_serial: AtomicU64,
     capacity: usize,
     ttl: Duration,
     queue_capacity: usize,
@@ -257,6 +263,7 @@ impl Hub {
             activities: Mutex::new(HashMap::new()),
             identifies: Mutex::new(HashMap::new()),
             preauth: Mutex::new(HashMap::new()),
+            next_serial: AtomicU64::new(0),
             capacity,
             ttl,
             queue_capacity,
@@ -273,38 +280,66 @@ impl Hub {
         Arc::new(Session {
             id,
             user_id,
+            serial: self.next_serial.fetch_add(1, Ordering::Relaxed),
             token_hash,
             capacity: self.capacity,
             inner: Mutex::new(SessionInner { seq: 0, buffer: VecDeque::new(), link, detached_at: None, generation }),
         })
     }
 
-    fn register(&self, session: &Arc<Session>) {
-        let mut sessions = lock(&self.sessions);
-        let ttl = self.ttl;
-        sessions.retain(|_, existing| lock(&existing.inner).detached_at.is_none_or(|since| since.elapsed() < ttl));
-        sessions.insert(session.id.clone(), session.clone());
+    /// Registers `session`, then forgets the user's sessions beyond `max`: those without a connection first, then the oldest
+    /// live ones, which close with `CLOSE_REPLACED` (the client reconnects; its Resume gets op 9 and it identifies again).
+    fn register(&self, session: &Arc<Session>, max: usize) {
+        let victims: Vec<Arc<Session>> = {
+            let mut sessions = lock(&self.sessions);
+            let ttl = self.ttl;
+            sessions.retain(|_, existing| lock(&existing.inner).detached_at.is_none_or(|since| since.elapsed() < ttl));
+            sessions.insert(session.id.clone(), session.clone());
+            let mut others: Vec<(bool, u64, String)> = sessions
+                .values()
+                .filter(|other| other.user_id == session.user_id && other.id != session.id)
+                .map(|other| (lock(&other.inner).link.is_some(), other.serial, other.id.clone()))
+                .collect();
+            let excess = (others.len() + 1).saturating_sub(max.max(1));
+            others.sort_unstable();
+            others.iter().take(excess).filter_map(|(_, _, id)| sessions.remove(id)).collect()
+        };
+        for victim in victims {
+            victim.terminate(CLOSE_REPLACED);
+        }
     }
 
     /// A registered session without a connection (the caller attaches one).
     pub fn create_session(&self, user_id: i64, id: String, token_hash: Vec<u8>) -> Arc<Session> {
         let session = self.new_session(user_id, id, token_hash, None);
-        self.register(&session);
+        self.register(&session, usize::MAX);
         session
     }
 
     /// Identify: a session that is attached to `link` and has already sent `READY` as sequence 1 (not kept in the replay buffer) when it becomes visible to dispatchers,
     /// so no event can be numbered ahead of READY or buffered without a connection. Returns it with the connection's generation.
-    pub fn open_session(&self, user_id: i64, id: String, token_hash: Vec<u8>, link: Link, ready: Value) -> (Arc<Session>, u64) {
+    /// The user keeps at most `max_sessions` sessions (this one included); older ones are forgotten (see `register`).
+    pub fn open_session(&self, user_id: i64, id: String, token_hash: Vec<u8>, link: Link, ready: Value, max_sessions: usize) -> (Arc<Session>, u64) {
         let session = self.new_session(user_id, id, token_hash, Some(link));
         session.push_locked(&mut lock(&session.inner), &Event::new("READY", &ready), false);
-        self.register(&session);
+        self.register(&session, max_sessions);
         let generation = lock(&session.inner).generation;
         (session, generation)
     }
 
     pub fn session(&self, id: &str) -> Option<Arc<Session>> {
         lock(&self.sessions).get(id).cloned()
+    }
+
+    /// A session a Resume may continue: one detached for `ttl` or longer is forgotten here and reads as missing.
+    pub fn resumable_session(&self, id: &str) -> Option<Arc<Session>> {
+        let mut sessions = lock(&self.sessions);
+        let expired = sessions.get(id)?.detached_for().is_some_and(|detached| detached >= self.ttl);
+        if expired {
+            sessions.remove(id);
+            return None;
+        }
+        sessions.get(id).cloned()
     }
 
     pub fn remove_session(&self, id: &str) {
@@ -501,12 +536,23 @@ mod tests {
     fn ready_is_sent_but_not_kept_for_replay() {
         let hub = hub(16);
         let (link, mut receiver) = hub.new_link();
-        let (session, _) = hub.open_session(1, "s".to_owned(), vec![1], link, serde_json::json!({"big": "ready"}));
+        let (session, _) = hub.open_session(1, "s".to_owned(), vec![1], link, serde_json::json!({"big": "ready"}), MAX_USER_SESSIONS);
         assert!(receiver.queue.try_recv().is_ok_and(|text| text.contains("\"t\":\"READY\"")));
         assert!(lock(&session.inner).buffer.is_empty());
         let (again, mut resumed) = hub.new_link();
         assert!(matches!(session.resume(again, 1, ("RESUMED", Value::Null)), ResumeOutcome::Resumed { replayed: 0, .. }));
         assert!(resumed.queue.try_recv().is_ok_and(|text| text.contains("\"s\":2")));
+    }
+
+    #[test]
+    fn a_session_detached_past_the_ttl_is_not_resumable() {
+        let hub = Hub::new(100, Duration::ZERO, 8);
+        let session = hub.create_session(1, "s".to_owned(), vec![1]);
+        let (link, _receiver) = hub.new_link();
+        let generation = session.attach(link);
+        assert!(hub.resumable_session("s").is_some(), "an attached session never expires");
+        assert!(session.detach(generation));
+        assert!(hub.resumable_session("s").is_none() && hub.session("s").is_none(), "the expired session is forgotten");
     }
 
     fn hub(queue: usize) -> Hub {
@@ -625,6 +671,24 @@ mod tests {
                 first_bad.map(|at| &seqs[at.saturating_sub(1)..=at])
             );
         }
+    }
+
+    #[test]
+    fn a_session_over_the_cap_forgets_detached_ones_first_then_closes_the_oldest() {
+        let hub = hub(8);
+        let detached = hub.create_session(1, "detached".to_owned(), vec![1]);
+        let (link, oldest) = hub.new_link();
+        hub.open_session(1, "oldest".to_owned(), vec![1], link, Value::Null, 2);
+        hub.create_session(2, "other user".to_owned(), vec![2]);
+        let (link, newer) = hub.new_link();
+        hub.open_session(1, "newer".to_owned(), vec![1], link, Value::Null, 2);
+        assert!(hub.session("detached").is_none() && lock(&detached.inner).link.is_none(), "a session without a connection goes first");
+        assert_eq!(oldest.signal.fired(), None);
+        let (link, _newest) = hub.new_link();
+        hub.open_session(1, "newest".to_owned(), vec![1], link, Value::Null, 2);
+        assert_eq!(oldest.signal.fired(), Some(CLOSE_REPLACED), "then the oldest live one, with a code the client reconnects on");
+        assert!(hub.session("oldest").is_none() && hub.session("newer").is_some() && hub.session("newest").is_some());
+        assert!(hub.session("other user").is_some() && newer.signal.fired().is_none());
     }
 
     #[test]

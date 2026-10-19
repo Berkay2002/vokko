@@ -74,7 +74,13 @@ cargo xtask privacy                  # personal-data guard, see CONTRIBUTING.md
 npm run build                        # tsc --noEmit + vite build
 npm test --workspace @vokko/desktop  # vitest
 npm run e2e --workspace @vokko/desktop  # Playwright against the mock
+cargo test -p xtask -p vokko-loadtest -p spotify-bot -p stremio-bot -p vokko-desktop
+npm test --prefix examples/echo-bot  # node --test
+cd integrations/ai-bridge && bun install && bun run typecheck && bun test  # same in integrations/claude-channel
+cargo audit && npm audit --omit=dev --audit-level=high  # advisory
 ```
+
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) gates on all of these except the bots (`spotify-bot`, `stremio-bot`), the Tauri crate and the audits, which run as non-blocking jobs.
 
 Desktop releases and the updater are described in [docs/desktop-release.md](docs/desktop-release.md); bots in [docs/api.md](docs/api.md) (applications, commands, interactions) and [examples/echo-bot](examples/echo-bot); web games in [docs/games-sdk.md](docs/games-sdk.md).
 

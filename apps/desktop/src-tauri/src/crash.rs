@@ -43,7 +43,7 @@ pub fn install(config_dir: Option<PathBuf>) {
             version: env!("CARGO_PKG_VERSION").to_owned(),
         };
         if let (Some(path), Ok(json)) = (PATH.get(), serde_json::to_vec(&crash)) {
-            let _ = std::fs::write(path, json);
+            let _ = vokko_platform::write_atomic(path, &json);
         }
         previous(info);
     }));

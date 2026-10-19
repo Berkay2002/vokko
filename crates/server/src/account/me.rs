@@ -35,9 +35,10 @@ pub async fn confirm_password(state: &AppState, user_id: i64, password: Option<S
     let mismatch = || ApiErr::invalid("password", "Password does not match.");
     let Some(password) = password.filter(|password| !password.is_empty()) else { return Err(mismatch()) };
     let attempt = super::security::begin_attempt(state, "password_failures", user_id, "Too many wrong passwords. Try again in 15 minutes.").await?;
-    let accepted = verify_password(password, hash).await;
-    super::security::end_attempt(state, "password_failures", attempt, accepted).await?;
-    if accepted { Ok(()) } else { Err(mismatch()) }
+    let verified = verify_password(password, hash).await;
+    // a busy server (429) is not a wrong password: it does not count
+    super::security::end_attempt(state, "password_failures", attempt, !matches!(verified, Ok(false))).await?;
+    if verified? { Ok(()) } else { Err(mismatch()) }
 }
 
 /// Confirms it is really the account owner before a sensitive change. Accounts with a password give it (and with
@@ -80,8 +81,10 @@ pub async fn cancel_email_change(state: &AppState, user_id: i64, current: &str) 
     Ok(())
 }
 
-/// Deletes the user's sessions (all, or all but `keep`) and closes their gateway connections with 4004.
+/// Deletes the user's sessions (all, or all but `keep`) and pending MFA login tickets, and closes their gateway connections with 4004.
 pub async fn revoke_sessions(state: &AppState, user_id: i64, keep: Option<&[u8]>) -> ApiResult<()> {
+    // a ticket from a login with the old password must not finish into a new session
+    sqlx::query("DELETE FROM mfa_tickets WHERE user_id = $1").bind(user_id).execute(&state.db).await?;
     let hashes: Vec<(Vec<u8>,)> = sqlx::query_as("DELETE FROM sessions WHERE user_id = $1 AND ($2::bytea IS NULL OR token_hash <> $2) RETURNING token_hash")
         .bind(user_id)
         .bind(keep)
@@ -131,6 +134,11 @@ pub async fn edit_account(
         return Ok(Json(EditAccountResponse { user: current, account: before }));
     }
     confirm_identity(&state, user_id, &headers, body.password, body.code.as_deref(), false).await?;
+    // hashing can answer 429 when the server is busy, so it runs before anything is written or mailed
+    let password_hash = match body.new_password {
+        Some(new_password) => Some(hash_password(new_password).await?),
+        None => None,
+    };
     if let Some(email) = &email {
         let (taken,): (bool,) =
             sqlx::query_as("SELECT EXISTS (SELECT 1 FROM users WHERE email = $1 AND id <> $2)").bind(email).bind(user_id).fetch_one(&state.db).await?;
@@ -151,15 +159,14 @@ pub async fn edit_account(
     }
     if let Some(email) = &email {
         sqlx::query("UPDATE users SET pending_email = $2 WHERE id = $1").bind(user_id).bind(email).execute(&state.db).await?;
-        send_verification(&state, user_id, email).await?;
+        send_verification(&state, user_id, email, None).await?;
         state.accounts.mailer.send(
             &before.email,
             "Your Vokko email is changing",
             format!("Someone asked to change the email of your Vokko account to {email}. It changes once the new address is verified. If this wasn't you, change your password now."),
         );
     }
-    if let Some(new_password) = body.new_password {
-        let hash = hash_password(new_password).await?;
+    if let Some(hash) = password_hash {
         sqlx::query("UPDATE users SET password_hash = $2 WHERE id = $1").bind(user_id).bind(hash).execute(&state.db).await?;
         let keep = bearer_header(&headers).map(hash_token);
         revoke_sessions(&state, user_id, keep.as_deref()).await?;

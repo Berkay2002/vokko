@@ -8,17 +8,33 @@ use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
 use rand::RngCore;
 use sha2::{Digest, Sha256};
-use tokio::sync::Semaphore;
+use std::time::Duration;
+use tokio::sync::{Semaphore, SemaphorePermit};
 
 use crate::error::{ApiErr, ApiResult};
 use crate::state::AppState;
 
-/// Argon2 takes ~19 MiB and tens of milliseconds of CPU: at most this many run at once, the rest wait.
+/// Argon2 takes ~19 MiB and tens of milliseconds of CPU: at most this many run at once, the rest wait up to HASH_WAIT.
 const MAX_CONCURRENT_HASHES: usize = 4;
+const HASH_WAIT: Duration = Duration::from_secs(2);
 static HASH_SLOTS: Semaphore = Semaphore::const_new(MAX_CONCURRENT_HASHES);
 
+/// A hashing slot, or 429 with `Retry-After` when none frees up within `wait`, so a flood of logins cannot queue
+/// everyone else's sign-in behind it without bound.
+async fn hash_slot(slots: &Semaphore, wait: Duration) -> ApiResult<SemaphorePermit<'_>> {
+    match tokio::time::timeout(wait, slots.acquire()).await {
+        Ok(Ok(slot)) => Ok(slot),
+        Ok(Err(_)) => Err(ApiErr::internal()),
+        Err(_) => {
+            let mut error = ApiErr::rate_limited(wait.as_secs_f64());
+            error.body.message = "The server is busy. Try again in a moment.".to_owned();
+            Err(error)
+        }
+    }
+}
+
 pub async fn hash_password(password: String) -> ApiResult<String> {
-    let _slot = HASH_SLOTS.acquire().await.map_err(|_| ApiErr::internal())?;
+    let _slot = hash_slot(&HASH_SLOTS, HASH_WAIT).await?;
     let result = tokio::task::spawn_blocking(move || {
         let salt = SaltString::generate(&mut OsRng);
         Argon2::default().hash_password(password.as_bytes(), &salt).map(|hash| hash.to_string())
@@ -30,14 +46,15 @@ pub async fn hash_password(password: String) -> ApiResult<String> {
     }
 }
 
-pub async fn verify_password(password: String, hash: String) -> bool {
-    let Ok(_slot) = HASH_SLOTS.acquire().await else { return false };
-    tokio::task::spawn_blocking(move || match PasswordHash::new(&hash) {
+/// Whether `password` matches `hash`; errors only when the server is too busy to check (429, see `hash_slot`).
+pub async fn verify_password(password: String, hash: String) -> ApiResult<bool> {
+    let _slot = hash_slot(&HASH_SLOTS, HASH_WAIT).await?;
+    Ok(tokio::task::spawn_blocking(move || match PasswordHash::new(&hash) {
         Ok(parsed) => Argon2::default().verify_password(password.as_bytes(), &parsed).is_ok(),
         Err(_) => false,
     })
     .await
-    .unwrap_or(false)
+    .unwrap_or(false))
 }
 
 pub fn random_hex(bytes: usize) -> String {
@@ -125,5 +142,21 @@ impl axum::extract::OptionalFromRequestParts<AppState> for AuthUser {
             return Ok(None);
         }
         <Self as FromRequestParts<AppState>>::from_request_parts(parts, state).await.map(Some)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn hash_slot_refuses_with_retry_after_when_every_slot_stays_busy() {
+        let slots = Semaphore::new(1);
+        let held = slots.acquire().await.unwrap();
+        let refused = hash_slot(&slots, Duration::from_millis(20)).await.unwrap_err();
+        assert_eq!(refused.status, axum::http::StatusCode::TOO_MANY_REQUESTS);
+        assert!(refused.retry_after.is_some_and(|seconds| seconds > 0.0));
+        drop(held);
+        assert!(hash_slot(&slots, Duration::from_millis(20)).await.is_ok());
     }
 }

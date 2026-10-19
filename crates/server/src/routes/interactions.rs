@@ -18,8 +18,8 @@ use vokko_protocol::api::{
 
 use crate::access::{self, channel_access};
 use crate::apps::{
-    self, CALLBACK_WINDOW, COMMAND_COLS, CommandRow, MessageIdentity, TOKEN_LIFETIME_SECS, find_component, option_id, resolve_app_mentions, validate_body,
-    validate_components,
+    self, CALLBACK_WINDOW, COMMAND_COLS, CommandRow, MessageIdentity, TOKEN_LIFETIME_SECS, find_component, option_id, resolve_app_mentions, text_len,
+    validate_body, validate_components,
 };
 use crate::auth::{HumanUser, hash_token, random_hex};
 use crate::error::{ApiErr, ApiResult};
@@ -573,6 +573,16 @@ async fn callback(
         let choices = data.choices.clone().unwrap_or_default();
         if choices.len() > 25 {
             return Err(ApiErr::invalid("data.choices", "Must be 25 or fewer in length."));
+        }
+        // Type-agnostic: the row does not keep the focused option, and check_options still checks the type on submit.
+        for choice in &choices {
+            if !text_len(&choice.name, 1, 100) {
+                return Err(ApiErr::invalid("data.choices", "Choice names must be between 1 and 100 in length."));
+            }
+            let value = &choice.value;
+            if !(value.as_str().is_some_and(|value| text_len(value, 1, 100)) || value.as_f64().is_some_and(f64::is_finite)) {
+                return Err(ApiErr::invalid("data.choices", "Choice values must be a string or a number."));
+            }
         }
     } else if body.kind != InteractionCallbackType::DeferredUpdateMessage {
         let components = data.components.as_deref().map(validate_components).transpose()?;

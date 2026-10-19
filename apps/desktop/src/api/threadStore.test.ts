@@ -175,4 +175,15 @@ describe("threads in the store", () => {
     await vi.advanceTimersByTimeAsync(200);
     expect(Object.keys(appStore.getState().threads).sort()).toEqual(["6", "7"]); // "1" is no longer visible; the archived "6" stays
   });
+
+  it("a member update replaces the cached member, so an omitted default (mute, deaf, flags) clears the old value", () => {
+    const base = { user, nick: null, roles: [], joined_at: "2026-01-01T00:00:00.000Z", guild_id: GUILD };
+    fire("GUILD_MEMBER_UPDATE", { ...base, mute: true, deaf: true, flags: 2 });
+    fire("GUILD_MEMBER_UPDATE", base);
+    const cached = appStore.getState().members[GUILD]?.[user.id];
+    expect(cached).toMatchObject({ nick: null });
+    expect(cached?.mute).toBeFalsy();
+    expect(cached?.deaf).toBeFalsy();
+    expect(cached?.flags ?? 0).toBe(0);
+  });
 });

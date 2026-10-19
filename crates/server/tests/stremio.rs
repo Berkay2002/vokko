@@ -649,7 +649,10 @@ async fn linking_by_code_and_by_login_stores_a_sealed_key() {
     assert_eq!(w.app.post("/users/@me/stremio/link/poll", &w.alice, json!({})).await.1["linked"], true);
     let (_, state) = w.app.get("/users/@me/stremio", &w.alice).await;
     assert_eq!(state["linked"], true);
-    assert!(state["linked_at"].is_string());
+    // From the server's clock, not the database's: a database clock ahead of it made items started right after linking never saved.
+    let linked_at =
+        time::OffsetDateTime::parse(state["linked_at"].as_str().expect("linked_at"), &time::format_description::well_known::Rfc3339).expect("rfc3339");
+    assert!(linked_at <= time::OffsetDateTime::now_utc(), "{linked_at}");
     assert_no_secrets("the account status", &state);
 
     // The key is encrypted at rest, and bound to the user: the same bytes under another user's id do not open.

@@ -53,6 +53,10 @@ jobs:
         run: cargo test -p vokko-server -p vokko-protocol -p vokko-engine -p vokko-platform -p vokko-cli
       - name: layers
         run: cargo xtask layers
+      - name: clippy (xtask, loadtest)
+        run: cargo clippy -p xtask -p vokko-loadtest --all-targets -- -D warnings
+      - name: test (xtask, loadtest)
+        run: cargo test -p xtask -p vokko-loadtest
 
   privacy:
     # Its own job with no third-party actions, so nothing else on the runner can read the denylist secret.
@@ -84,9 +88,73 @@ jobs:
         working-directory: apps/desktop
         run: npm test
 
-  e2e:
+  media-bots:
+    # Optional like tauri: livekit's webrtc-sys downloads a prebuilt libwebrtc and needs the glib headers.
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          components: clippy
+      - name: glib headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglib2.0-dev
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: clippy
+        run: cargo clippy -p spotify-bot -p stremio-bot --all-targets -- -D warnings
+      - name: test
+        run: cargo test -p spotify-bot -p stremio-bot
+
+  integrations:
+    # The echo-bot example (Node's type stripping) and the Bun integrations; none of them are npm workspaces.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - name: echo-bot
+        working-directory: examples/echo-bot
+        run: npm test
+      - name: ai-bridge
+        working-directory: integrations/ai-bridge
+        run: bun install --frozen-lockfile && bun run typecheck && bun test
+      - name: claude-channel
+        working-directory: integrations/claude-channel
+        run: bun install --frozen-lockfile && bun run typecheck && bun test
+
+  audit:
+    # Advisory only: new advisories appear without any change here and would block unrelated PRs, and the current
+    # ones (boardgame.io's server-side koa/socket.io deps, which the client never runs) have no non-breaking fix.
+    # Read the job log; Dependabot opens the update PRs.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        with:
+          tool: cargo-audit
+      - name: cargo audit
+        run: cargo audit
+      - name: npm audit
+        if: always()
+        run: npm audit --omit=dev --audit-level=high
+
+  e2e:
+    # One worker runs the whole suite in about 31 minutes, so it is split by spec file into four shards (each with its own
+    # dev server); a failing shard does not cancel the others.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -100,12 +168,12 @@ jobs:
       # Runs against the in-memory mock (VITE_VOKKO_API unset); the playwright config starts the dev server itself.
       - name: e2e
         working-directory: apps/desktop
-        run: npm run e2e
+        run: npm run e2e -- --shard=${{ matrix.shard }}/4
       - name: upload report
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.shard }}
           path: |
             apps/desktop/test-results/
             apps/desktop/playwright-report/
@@ -117,6 +185,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     continue-on-error: true
+    env:
+      # Native voice's webrtc-sys links a libwebrtc.a built against Chromium's libc++, which needs clang 21 or later
+      # (it refuses GCC); Ubuntu 24.04 ships clang 18, so clang 21 comes from apt.llvm.org (key checked by fingerprint).
+      CC: clang-21
+      CXX: clang++-21
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -124,10 +197,16 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: webkit deps
+      # libasound2-dev for cpal (native voice), libdbus-1-dev for tao's dbus feature.
+      - name: native deps
         run: |
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/llvm.gpg
+          gpg --show-keys --with-colons /usr/share/keyrings/llvm.gpg | grep -q '^fpr:::::::::6084F3CF814B57C1CF12EFD515CF4D18AF4F7421:'
+          echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] https://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-21 main" |
+            sudo tee /etc/apt/sources.list.d/llvm-21.list
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev pkg-config libssl-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev pkg-config libssl-dev \
+            libasound2-dev libdbus-1-dev clang-21
       - run: npm ci
       # tauri.conf.json's frontendDist is checked at build time, so build the UI first.
       - name: build ui
@@ -136,3 +215,5 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: build tauri crate
         run: cargo build -p vokko-desktop
+      - name: test tauri crate
+        run: cargo test -p vokko-desktop

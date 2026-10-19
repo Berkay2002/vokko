@@ -322,6 +322,23 @@ async fn creation_and_moves_inherit_from_the_category() {
 }
 
 #[tokio::test]
+async fn creating_under_a_hidden_category_is_refused() {
+    let w = world().await;
+    w.role_for(&w.alice.1, DEFAULT_EVERYONE | MANAGE_CHANNELS).await;
+    let (_, hidden) = w.new_channel(json!({"type": 4, "name": "Staff"})).await;
+    let hidden_id = hidden["id"].as_str().expect("id").to_owned();
+    assert_eq!(w.put(&hidden_id, &w.alice.1, &w.owner, 1, 0, VIEW_CHANNEL).await.0, StatusCode::NO_CONTENT);
+    let path = format!("/guilds/{}/channels", w.guild);
+    let (status, error) = w.app.post(&path, &w.alice.0, json!({"type": 0, "name": "sneaky", "parent_id": hidden_id})).await;
+    assert_eq!((status, error["code"].as_u64()), (StatusCode::FORBIDDEN, Some(50001)), "{error}");
+    let (_, channels) = w.app.get(&path, &w.owner).await;
+    assert!(!channels.as_array().expect("channels").iter().any(|c| c["name"] == "sneaky"), "no channel was created");
+    // a category alice can see still works
+    let (status, created) = w.app.post(&path, &w.alice.0, json!({"type": 0, "name": "fine", "parent_id": w.category})).await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+}
+
+#[tokio::test]
 async fn category_edits_sync_equal_children_only() {
     let w = world().await;
     let mut owner = Client::connect(&w.address, &w.owner).await;

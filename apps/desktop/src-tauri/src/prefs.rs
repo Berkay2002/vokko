@@ -73,7 +73,7 @@ impl PrefsStore {
                 std::fs::create_dir_all(dir).map_err(|error| format!("cannot create {}: {error}", dir.display()))?;
             }
             let json = serde_json::to_vec_pretty(&next).map_err(|error| error.to_string())?;
-            std::fs::write(path, json).map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+            vokko_platform::write_atomic(path, &json).map_err(|error| format!("cannot write {}: {error}", path.display()))?;
         }
         Ok(next)
     }

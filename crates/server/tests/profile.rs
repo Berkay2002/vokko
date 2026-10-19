@@ -647,7 +647,7 @@ async fn deleting_the_account_takes_the_widgets_and_their_images() {
     let (_, me) = app.get("/users/@me", &owner).await;
     let owner_id: i64 = user_id(&me).parse().expect("owner id");
     let (link, mut receiver) = vokko_server::hub::link(64);
-    app.state.hub.open_session(owner_id, "profile-delete-watch".into(), Vec::new(), link, json!({}));
+    app.state.hub.open_session(owner_id, "profile-delete-watch".into(), Vec::new(), link, json!({}), vokko_server::hub::MAX_USER_SESSIONS);
     let (status, _) = app.post("/users/@me/delete", &member, json!({"password": "correct horse battery"})).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     assert_eq!(claimed(&app, &image).await, None, "the upload went with the account");

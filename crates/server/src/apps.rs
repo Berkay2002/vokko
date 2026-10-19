@@ -576,7 +576,7 @@ pub fn valid_command_name(name: &str) -> bool {
     (1..=32).contains(&count) && name.chars().all(|c| c == '-' || c == '_' || c.is_numeric() || (c.is_alphabetic() && !c.is_uppercase()))
 }
 
-fn text_len(value: &str, min: usize, max: usize) -> bool {
+pub(crate) fn text_len(value: &str, min: usize, max: usize) -> bool {
     (min..=max).contains(&value.chars().count())
 }
 

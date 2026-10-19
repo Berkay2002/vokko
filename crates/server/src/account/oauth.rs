@@ -629,7 +629,7 @@ pub async fn register(State(state): State<AppState>, headers: HeaderMap, ApiJson
         .await?;
     tx.commit().await?;
     if !verified {
-        send_verification(&state, id, &email).await?;
+        send_verification(&state, id, &email, None).await?;
     }
     let token = issue_session(&state, id, &headers).await?;
     mark_fresh(&state, &hash_token(&token)).await?;

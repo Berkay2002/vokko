@@ -1,5 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { COMMANDS, respond, type Interaction } from "./bot.ts";
 
 const interaction = (name: string, options: Interaction["data"]["options"] = []): Interaction => ({
@@ -23,4 +25,12 @@ test("roll uses the sides option (default 6)", () => {
 test("unknown commands get no answer and the registered set is /echo and /roll", () => {
   assert.equal(respond(interaction("nope")), null);
   assert.deepEqual(COMMANDS.map(c => c.name), ["echo", "roll"]);
+});
+
+test("running bot.ts directly starts it (here: fails fast without a token)", () => {
+  const env = { ...process.env };
+  delete env.VOKKO_BOT_TOKEN;
+  const result = spawnSync(process.execPath, [fileURLToPath(new URL("./bot.ts", import.meta.url))], { env, encoding: "utf8" });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /set VOKKO_BOT_TOKEN/);
 });

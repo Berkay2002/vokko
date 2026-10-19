@@ -72,7 +72,7 @@ pub async fn receive(State(state): State<AppState>, headers: HeaderMap, body: By
             let source = event.track.map(|track| track.source).unwrap_or_default();
             state::track_changed(&state, backend, channel_id, &participant, &source, event.event == "track_published").await;
         }
-        "room_finished" => state::room_finished(&state, backend, channel_id).await,
+        "room_finished" => state::room_finished(&state, backend, channel_id, event.created_at.as_ref().and_then(seconds)).await,
         _ => {}
     }
     StatusCode::OK

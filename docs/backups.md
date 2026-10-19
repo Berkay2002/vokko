@@ -3,7 +3,7 @@
 A Vokko server's state is two things: the Postgres database (users, messages, everything structured) and the server's
 data dir, `VOKKO_DATA_DIR` (uploads under `attachments/`; with `VOKKO_STORAGE=s3` they live in the bucket instead, back that
 up with the bucket's own versioning). `incoming/` only holds half-finished uploads and is skipped. Link-preview images
-(`embed_media`) are proxied, never stored, so there is nothing else to save.
+are only cached (`embed-media/`, up to 512 MiB, 7-day TTL) and skipped too, since the cache fills again after a restore.
 
 | Script | Does |
 |---|---|
@@ -21,13 +21,22 @@ up with the bucket's own versioning). `incoming/` only holds half-finished uploa
    and leaves nothing behind (each run writes to `.tmp-*` and is renamed only when verified).
 4. Writes `$VOKKO_BACKUP_DIR/daily/<YYYYMMDD-HHMMSS>/{db.dump,data.tar.gz}`. When no weekly is younger than 7 days the run is
    also hard-linked into `weekly/`. Keeps the newest `VOKKO_BACKUP_DAILY` (7) and `VOKKO_BACKUP_WEEKLY` (4).
-5. With `VOKKO_BACKUP_OFFSITE` set, `rsync -aH --delete` mirrors the whole backup dir there.
+5. With `VOKKO_BACKUP_OFFSITE` set, `rsync -aH --delete` mirrors the whole backup dir there, so the offsite copy follows
+   the rotation. Because a mirror also copies a loss, the sync is refused (exit 1, nothing deleted offsite) when the local
+   `daily/` plus `weekly/` hold fewer than half as many sets as the offsite copy, which is what an unmounted or wiped
+   backup disk looks like (the run then holds only its own new set). Fix the disk, or if the loss is intended (say you
+   lowered `VOKKO_BACKUP_DAILY` a lot), run the printed `rsync` command once by hand.
 
 Environment: `VOKKO_BACKUP_DIR` (required), `VOKKO_BACKUP_COMPOSE_DIR` (default `deploy/` next to the script),
 `VOKKO_BACKUP_DATA_VOLUME` (default `vokko_vokko-data`, the compose project name plus `_vokko-data`), `VOKKO_BACKUP_DAILY`,
 `VOKKO_BACKUP_WEEKLY`, `VOKKO_BACKUP_OFFSITE`. Without Docker, set `VOKKO_BACKUP_DATABASE_URL` and `VOKKO_BACKUP_DATA_DIR`
 and the local `pg_dump`/`pg_restore` (same major version as the server or newer) are used instead; that is the mode
 `backup-test.sh` runs in.
+
+Keep the password out of `VOKKO_BACKUP_DATABASE_URL` (`postgres://vokko@db.example/vokko`, not
+`postgres://vokko:secret@...`): the URL is passed to `pg_dump`, `pg_restore`, `dropdb` and `createdb` as an argument, and
+on a shared host other users can read process arguments. Put the password in `~/.pgpass` (mode `0600`) or the file named
+by `PGPASSFILE`; `PGPASSWORD` in the job's environment also works. libpq reads all three, so both scripts need nothing else.
 
 ## Nightly on macOS (launchd)
 
@@ -73,8 +82,10 @@ tools/restore.sh <backup dir>/daily/<stamp> --yes
 
 It checks both files first, stops `server`, drops and recreates the `vokko` database (so tables from a newer migration don't
 survive next to the old ones), `pg_restore --single-transaction --exit-on-error`, replaces the volume's contents (owner
-kept, uid 10001), and starts `server` again. Restore with the server image the backup came from or newer: a newer server
-runs its migrations on start, an older one doesn't know the newer tables.
+kept, uid 10001), and starts `server` again. Stopping and starting `server` happens only in compose mode: with
+`VOKKO_BACKUP_DATABASE_URL` and `VOKKO_BACKUP_DATA_DIR`, stop the server yourself before running the script and start it
+afterwards, or it writes to the new database and data dir while they are being restored. Restore with the server image
+the backup came from or newer: a newer server runs its migrations on start, an older one doesn't know the newer tables.
 
 Test a restore before you rely on it: `tools/backup-test.sh` with `VOKKO_TEST_ADMIN_URL=postgres://user:pass@host/postgres`
 (a user with CREATEDB) does the whole loop against `vokko_test_backup` and drops it again.

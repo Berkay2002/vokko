@@ -28,9 +28,9 @@ ENV VOKKO_DATA_DIR=/data \
 USER vokko
 VOLUME /data
 EXPOSE 8710
-# The server has no health route; a TCP connect proves the listener is up (migrations run before it binds). Uses bash's
-# /dev/tcp so the slim image needs no curl.
+# /healthz does a DB round trip; 503 (DB down) marks the container unhealthy. Uses bash's /dev/tcp and read so the slim
+# image needs no curl; matches ' 200 ' because hyper may answer the HTTP/1.0 request as HTTP/1.1.
 HEALTHCHECK --interval=15s --timeout=3s --start-period=30s --retries=3 \
-    CMD ["bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/${VOKKO_BIND##*:}"]
+    CMD ["bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/${VOKKO_BIND##*:} && printf 'GET /healthz HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && read -r status <&3 && [[ $status == *' 200 '* ]]"]
 ENTRYPOINT ["vokko-server"]
 CMD ["serve"]

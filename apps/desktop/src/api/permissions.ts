@@ -84,19 +84,25 @@ export const hasBit = (bits: bigint, permission: bigint): boolean => (bits & per
 type GuildLike = Pick<Guild, "id" | "owner_id" | "roles">;
 type MemberLike = { id: Snowflake; roles: Snowflake[]; communication_disabled_until?: string | null };
 
-/** Role-level permissions of a member (owner and administrator shortcuts included). */
-export function basePermissions(guild: GuildLike, member: MemberLike): bigint {
+/** Role-level permissions of a member (owner and administrator shortcuts included), clamped by an active timeout (Q4.5). */
+export function basePermissions(guild: GuildLike, member: MemberLike, now = Date.now()): bigint {
   if (guild.owner_id === member.id) return ALL_PERMISSIONS;
   const everyone = guild.roles.find(r => r.id === guild.id);
   let bits = everyone ? parseBits(everyone.permissions) : DEFAULT_EVERYONE;
   for (const role of guild.roles) if (role.id !== guild.id && member.roles.includes(role.id)) bits |= parseBits(role.permissions);
   if (hasBit(bits, Perm.ADMINISTRATOR)) return ALL_PERMISSIONS;
-  return bits;
+  return timedOut(member, now) ? bits & TIMEOUT_ALLOWED : bits;
 }
+
+/** What a timed-out member keeps (the server's TIMEOUT_ALLOWED); the owner and administrators are never clamped. */
+const TIMEOUT_ALLOWED = Perm.VIEW_CHANNEL | Perm.READ_MESSAGE_HISTORY;
+
+const timedOut = (member: MemberLike, now: number): boolean =>
+  !!member.communication_disabled_until && Date.parse(member.communication_disabled_until) > now;
 
 /** Channel-level permissions: base, then overwrites (@everyone, roles, member), then the timeout mask (Q4.5). */
 export function channelPermissions(guild: GuildLike, member: MemberLike, channel?: Pick<Channel, "permission_overwrites" | "parent_id"> | null, now = Date.now()): bigint {
-  let bits = basePermissions(guild, member);
+  let bits = basePermissions(guild, member, now);
   if (guild.owner_id === member.id || hasBit(bits, Perm.ADMINISTRATOR)) return bits;
   const overwrites = channel?.permission_overwrites ?? [];
   const everyone = overwrites.find(o => o.type === OverwriteType.Role && o.id === guild.id);
@@ -112,8 +118,7 @@ export function channelPermissions(guild: GuildLike, member: MemberLike, channel
   bits = (bits & ~deny) | allow;
   const own = overwrites.find(o => o.type === OverwriteType.Member && o.id === member.id);
   if (own) bits = (bits & ~parseBits(own.deny)) | parseBits(own.allow);
-  const until = member.communication_disabled_until ? Date.parse(member.communication_disabled_until) : 0;
-  if (until > now) bits &= Perm.VIEW_CHANNEL | Perm.READ_MESSAGE_HISTORY;
+  if (timedOut(member, now)) bits &= TIMEOUT_ALLOWED;
   return bits;
 }
 
@@ -150,12 +155,26 @@ export function highestPosition(guild: GuildLike, roleIds: Snowflake[]): number 
   return top;
 }
 
+type RoleRank = Pick<Role, "id" | "position">;
+
+/** Whether role `a` outranks role `b` (the server's compare_roles): higher position wins, a tie goes to the older (smaller) snowflake. */
+const roleAbove = (a: RoleRank, b: RoleRank): boolean => a.position > b.position || (a.position === b.position && a.id !== b.id && BigInt(a.id) < BigInt(b.id));
+
+/** The member's highest role by (position, id), ignoring @everyone; undefined when they hold none. */
+export function topRole(guild: GuildLike, roleIds: Snowflake[]): RoleRank | undefined {
+  let top: RoleRank | undefined;
+  for (const role of guild.roles) if (role.id !== guild.id && roleIds.includes(role.id) && (!top || roleAbove(role, top))) top = role;
+  return top;
+}
+
 /** Hierarchy rule for moderating a member (Q4.5 canManageUser): never the owner, owner always, otherwise strictly outrank. */
 export function outranks(guild: GuildLike, actor: MemberLike, target: MemberLike): boolean {
   if (target.id === guild.owner_id) return false;
   if (actor.id === guild.owner_id) return true;
   if (target.roles.length === 0) return true;
-  return highestPosition(guild, actor.roles) > highestPosition(guild, target.roles);
+  const mine = topRole(guild, actor.roles);
+  const theirs = topRole(guild, target.roles);
+  return !!mine && (!theirs || roleAbove(mine, theirs));
 }
 
 /** Can the actor create or edit a role / hand it out? Needs MANAGE_ROLES and to outrank the role (owner exempt). */
@@ -163,7 +182,8 @@ export function canEditRole(guild: GuildLike, actor: MemberLike, role: Pick<Role
   if (!hasBit(basePermissions(guild, actor), Perm.MANAGE_ROLES)) return false;
   if (actor.id === guild.owner_id) return true;
   if (role.id === guild.id) return true;
-  return highestPosition(guild, actor.roles) > role.position;
+  const mine = topRole(guild, actor.roles);
+  return !!mine && roleAbove(mine, role);
 }
 
 export type ModerationAction = "kick" | "ban" | "timeout" | "nickname" | "roles";

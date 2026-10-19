@@ -86,6 +86,7 @@ Read by `vokko-server` from the environment (a `.env.dev` file found from the wo
 | `VOKKO_LIVEKIT_URL_2`, `_API_KEY_2`, `_API_SECRET_2`, `_API_URL_2`, `_LABEL_2` (then `_3`, ...) | unset | More LiveKit backends: the same settings as backend 1, with a number. Numbering continues until the first index with none of URL, API_KEY and API_SECRET set; a backend with only some of them set, or numbered after a gap, stops the server at start. See [Multiple LiveKit backends with failover](#multiple-livekit-backends-with-failover). |
 | `VOKKO_VOICE_BITRATE_MAX` | `128000` | Highest voice channel bitrate in bps (8000-384000). New channels start at 64000. |
 | `VOKKO_VOICE_CONNECT_TIMEOUT_SECS` | `30` | How long a client may take to reach LiveKit after getting its voice token (5-600 s) before its voice state is dropped. Raise it when clients connect over slow TURN/TCP. |
+| `VOKKO_SECRETS_KEY` | unset (a random key on each start) | 32 random bytes as base64 (`openssl rand -base64 32`; standard or URL-safe alphabet). It keeps embed image URLs and game app ids the same across restarts and encrypts linked Stremio keys, so set it even without Stremio. Losing or changing it unlinks every Stremio account and changes existing embed image URLs and app ids. A value that is not base64 or not exactly 32 bytes stops the server at start. |
 | `RUST_LOG` | `vokko_server=info,warn` | Log filter. |
 
 Compose-only variables (`deploy/.env.example`): `POSTGRES_PASSWORD`, `VOKKO_SERVER_LISTEN` (host publish address for the server, default `127.0.0.1:8710`), `VOKKO_SITE_ADDRESS`, `VOKKO_WEB_HTTP_PORT`, `VOKKO_WEB_HTTPS_PORT`.
@@ -391,7 +392,6 @@ Rows are deleted 30 days after they were sent.
 
 ## Not production-ready yet
 
-- Only the Postgres service in `deploy/docker-compose.yml` has a healthcheck; the server service has none. `GET /healthz` (see above) is the check to point one at.
 - Voice, video, screen share and DM calls need the LiveKit server described under Voice (LiveKit); without it those features are unavailable and text chat still works.
 - Per-address limits treat an IPv6 /64 as one client (a single host usually holds a whole /64). Devices on one IPv6 LAN, or clients behind a NAT64 gateway (`64:ff9b::/96`), therefore share the login limit and the 16 unidentified gateway sockets, as devices behind one IPv4 NAT do.
 - Reports of DM messages (Report Message in a DM) have no guild, so no moderator sees them in the app: they are kept in the `reports` table with `guild_id IS NULL` until you delete them (`SELECT * FROM reports WHERE guild_id IS NULL AND status = 'open'`; close one with `UPDATE reports SET status = 'resolved', closed_at = now() WHERE id = ...`). Each keeps the reported text, also after the author deletes it or their account.

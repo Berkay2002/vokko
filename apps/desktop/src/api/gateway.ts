@@ -161,6 +161,9 @@ class GatewayClient {
 
   private open(): void {
     if (!this.wanted) return;
+    // A pending backoff timer (e.g. when the browser's "online" event opens early) would otherwise open a second socket.
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
     this.setRetry(this.attempts, null);
     this.setStatus(this.sessionId || this.attempts > 0 ? "reconnecting" : "connecting");
     const socket: Socket = MOCK ? new (mockBackend().MockSocket)() : (new WebSocket(GATEWAY_URL) as unknown as Socket);
@@ -193,8 +196,9 @@ class GatewayClient {
       case GatewayOp.Hello: {
         this.clearHelloTimer();
         const interval = (payload.d as { heartbeat_interval: number }).heartbeat_interval;
-        this.startHeartbeat(interval);
+        // Measured before startHeartbeat, which resets lastAckAt.
         const fresh = Date.now() - this.lastAckAt < RESUME_WINDOW_MS;
+        this.startHeartbeat(interval);
         if (this.sessionId && this.seq != null && fresh) this.send(GatewayOp.Resume, { token: this.token, session_id: this.sessionId, seq: this.seq });
         else {
           this.sessionId = null;

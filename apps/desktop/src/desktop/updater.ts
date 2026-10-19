@@ -2,9 +2,13 @@ import { create } from "zustand";
 import { call, callStrict, isDesktop, onDesktopEvent } from "./tauri";
 import { getAppVersion } from "./window";
 
-/** Mirrors `updates::UpdateStatus` in src-tauri. `disabled` means this build has no updater config (or this is the browser). */
+/**
+ * Mirrors `updates::UpdateStatus` in src-tauri. `disabled` means this build has no updater config (or this is the browser);
+ * `packageManager` is a Linux .deb install, which its package manager updates.
+ */
 export type UpdateStatus =
   | { state: "disabled" }
+  | { state: "packageManager" }
   | { state: "idle" }
   | { state: "checking" }
   | { state: "upToDate" }
@@ -75,7 +79,7 @@ export async function initUpdater(options: { checkIntervalMs?: number } = {}): P
   const unlisten = await onDesktopEvent<UpdateStatus>(UPDATE_EVENT, publish);
   const initial = await call<UpdateStatus>("desktop_update_status", undefined, DISABLED);
   publish(initial);
-  if (initial.state === "disabled") {
+  if (initial.state === "disabled" || initial.state === "packageManager") {
     unlisten();
     started = false;
     return () => undefined;

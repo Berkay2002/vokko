@@ -918,13 +918,17 @@ async fn update_role_positions(
         }
         wanted.insert(role_id, update.position);
     }
+    // One transaction under the guild row lock, so concurrent reorders serialize and a failure leaves no half-applied order.
+    let mut tx = state.db.begin().await?;
+    sqlx::query("SELECT id FROM guilds WHERE id = $1 FOR NO KEY UPDATE").bind(guild).execute(&mut *tx).await?;
     let mut changed = Vec::new();
     for (role_id, position) in wanted {
         if ctx.role(role_id).is_some_and(|row| row.position != position) {
-            sqlx::query("UPDATE roles SET position = $2 WHERE id = $1").bind(role_id).bind(position).execute(&state.db).await?;
+            sqlx::query("UPDATE roles SET position = $2 WHERE id = $1").bind(role_id).bind(position).execute(&mut *tx).await?;
             changed.push(role_id);
         }
     }
+    tx.commit().await?;
     let roles = load_roles(&state, guild).await?;
     changed.sort_unstable();
     for role_id in changed {
@@ -958,11 +962,14 @@ async fn delete_role(
     // Overwrites naming the role go with it (member_roles rows cascade); the affected channels are re-sent, and the channels
     // the role opened or closed reach the members who lost or gained them.
     let viewers_before = overwrites::guild_viewers(&state, guild).await?;
+    // Both deletes in one transaction, so a failure between them never drops the overwrites while the role survives.
+    let mut tx = state.db.begin().await?;
     let channels: Vec<(i64,)> = sqlx::query_as("DELETE FROM permission_overwrites WHERE target_type = 0 AND target_id = $1 RETURNING channel_id")
         .bind(role_id)
-        .fetch_all(&state.db)
+        .fetch_all(&mut *tx)
         .await?;
-    sqlx::query("DELETE FROM roles WHERE id = $1").bind(role_id).execute(&state.db).await?;
+    sqlx::query("DELETE FROM roles WHERE id = $1").bind(role_id).execute(&mut *tx).await?;
+    tx.commit().await?;
     let members = access::guild_member_ids(&state, guild).await?;
     overwrites::dispatch_guild_visibility(&state, &viewers_before).await?;
     state.hub.send(&members, &GatewayEvent::GuildRoleDelete(GuildRoleDelete { guild_id: Snowflake::from(guild), role_id: Snowflake::from(role_id) }));

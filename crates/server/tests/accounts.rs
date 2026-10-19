@@ -129,6 +129,12 @@ async fn registration_mails_a_single_use_verification_link() {
     let first = app.mailed_token("verifyme@example.test", "verify");
     assert_eq!(first.len(), 64);
 
+    // one mail a minute per account
+    let (status, error) = app.post("/auth/verify/resend", &token, json!({})).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert!(error["retry_after"].as_f64().is_some_and(|wait| wait > 0.0 && wait <= 60.0));
+    sqlx::query("UPDATE email_tokens SET created_at = created_at - interval '61 seconds'").execute(&app.state.db).await.expect("age link");
+
     // a resend replaces the earlier link
     assert_eq!(app.post("/auth/verify/resend", &token, json!({})).await.0, StatusCode::NO_CONTENT);
     let second = app.mailed_token("verifyme@example.test", "verify");
@@ -147,6 +153,39 @@ async fn registration_mails_a_single_use_verification_link() {
     // tokens are stored hashed
     let (stored,): (i64,) = sqlx::query_as("SELECT count(*) FROM email_tokens").fetch_one(&app.state.db).await.expect("count");
     assert_eq!(stored, 0);
+}
+
+#[tokio::test]
+async fn concurrent_resends_mail_one_link() {
+    let app = TestApp::new().await;
+    let (token, _) = app.register("racer").await;
+    app.register("racer2").await;
+    sqlx::query("UPDATE email_tokens SET created_at = created_at - interval '61 seconds'").execute(&app.state.db).await.expect("age links");
+    let mails = |to: &'static str, page: &'static str| {
+        let marker = format!("/{page}#token=");
+        app.state.accounts.mailer.sent().iter().filter(|mail| mail.to == to && mail.body.contains(&marker)).count()
+    };
+    let before = mails("racer@example.test", "verify");
+    let statuses: Vec<StatusCode> = futures_util::future::join_all((0..8).map(|_| app.post("/auth/verify/resend", &token, json!({}))))
+        .await
+        .into_iter()
+        .map(|(status, _)| status)
+        .collect();
+    assert_eq!(statuses.iter().filter(|status| **status == StatusCode::NO_CONTENT).count(), 1, "{statuses:?}");
+    assert!(statuses.iter().all(|status| *status == StatusCode::NO_CONTENT || *status == StatusCode::TOO_MANY_REQUESTS), "{statuses:?}");
+    assert_eq!(mails("racer@example.test", "verify"), before + 1);
+
+    // password reset: the mails go out in the background, so wait for them to settle
+    futures_util::future::join_all((0..8).map(|_| app.send(Method::POST, "/auth/forgot", None, Some(json!({"login": "racer2"}))))).await;
+    app.mailed_token_soon("racer2@example.test", "reset").await;
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert_eq!(mails("racer2@example.test", "reset"), 1);
+    let (stored,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM email_tokens t JOIN users u ON u.id = t.user_id WHERE u.username = 'racer2' AND t.purpose = 'reset'")
+            .fetch_one(&app.state.db)
+            .await
+            .expect("count");
+    assert_eq!(stored, 1);
 }
 
 async fn login(app: &TestApp, login: &str, password: &str) -> (StatusCode, Value) {
@@ -553,6 +592,9 @@ async fn wrong_codes_are_limited_per_account_across_tickets() {
     let (_, step) = login(&app, "hammered", "correct horse battery").await;
     let (status, error) = app.send(Method::POST, "/auth/mfa/totp", None, Some(json!({"ticket": step["ticket"], "code": backup}))).await;
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{error}");
+    // a RateLimitError (with Retry-After) counting down to when the oldest failure leaves the window, keeping its message
+    assert!(error["retry_after"].as_f64().is_some_and(|wait| wait > 600.0 && wait <= 900.0), "{error}");
+    assert_eq!(error["message"], "Too many wrong codes. Try again in 15 minutes.");
     assert_eq!(app.post("/users/@me/mfa/totp/disable", &token, json!({"code": backup})).await.0, StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(app.post("/users/@me/delete", &token, json!({"password": "correct horse battery", "code": backup})).await.0, StatusCode::TOO_MANY_REQUESTS);
     // the backup code was never spent by the refused attempts
@@ -583,6 +625,27 @@ async fn delete_purges_pending_tickets_in_one_go() {
     // the pending login ticket died with the account
     let (status, _) = app.send(Method::POST, "/auth/mfa/totp", None, Some(json!({"ticket": ticket, "code": totp(1)}))).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn password_reset_kills_pending_mfa_tickets() {
+    let app = TestApp::new().await;
+    let (token, _) = app.register("relocked").await;
+    app.verify_email("relocked@example.test").await;
+    let (_, enabled) = app.post("/users/@me/mfa/totp/enable", &token, json!({"password": "correct horse battery", "secret": SECRET, "code": totp(0)})).await;
+    let backup = enabled["backup_codes"][0]["code"].as_str().expect("code").to_owned();
+    let (_, step) = login(&app, "relocked", "correct horse battery").await;
+    let stale = step["ticket"].as_str().expect("ticket").to_owned();
+    assert_eq!(app.send(Method::POST, "/auth/forgot", None, Some(json!({"login": "relocked"}))).await.0, StatusCode::NO_CONTENT);
+    let link = app.mailed_token_soon("relocked@example.test", "reset").await;
+    let (status, reset) = app.send(Method::POST, "/auth/reset", None, Some(json!({"token": link, "password": "taking it back now"}))).await;
+    assert_eq!(status, StatusCode::OK, "{reset}");
+    let mfa = |ticket: &str, code: &str| app.send(Method::POST, "/auth/mfa/totp", None, Some(json!({"ticket": ticket, "code": code})));
+    let (status, error) = mfa(&stale, &backup).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(error["errors"]["ticket"].is_object(), "{error}");
+    // the reset's own ticket still finishes the login
+    assert_eq!(mfa(reset["ticket"].as_str().expect("ticket"), &backup).await.0, StatusCode::OK);
 }
 
 #[tokio::test]

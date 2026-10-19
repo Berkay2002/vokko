@@ -121,26 +121,53 @@ fn privacy() -> Result<(), Box<dyn std::error::Error>> {
         let lines: Vec<String> = bad.iter().map(usize::to_string).collect();
         return Err(format!("the privacy denylist has {} pattern(s) that cannot be compiled (line(s) {})", bad.len(), lines.join(", ")).into());
     }
+    // No `-I`: binary files (images, fonts, PDFs) are searched too, and a hit prints only `Binary file <path> matches`, never the
+    // matched bytes. Metadata stored as UTF-16 or compressed (PNG zTXt, PDF streams) still cannot match, and compressed bytes can
+    // match a short case-insensitive pattern by chance (a false positive to check locally).
+    let mut hits = grep(root, &patterns, &["--", ".", ":(exclude,glob)**/Cargo.lock", ":(exclude,glob)**/package-lock.json"])?;
+    // File names are checked as well: the tracked paths go to a git-ignored file that is searched by line number.
+    let list = Command::new("git").current_dir(root).args(["-c", "core.quotePath=false", "ls-files"]).output()?;
+    if !list.status.success() {
+        return Err("git ls-files failed".into());
+    }
+    std::fs::create_dir_all(root.join("target"))?;
+    std::fs::write(root.join(PATH_LIST), &list.stdout)?;
+    let path_hits = grep(root, &patterns, &["--no-index", "--", PATH_LIST]);
+    let _ = std::fs::remove_file(root.join(PATH_LIST));
+    // Reported by position, not by path: the path itself holds the matched text, and CI logs must never echo it.
+    hits.extend(line_numbers(&path_hits?).into_iter().map(|n| format!("tracked path #{n} (file name; `git ls-files | sed -n {n}p` shows it)")));
+    if hits.is_empty() {
+        println!("Privacy guard passed: {} pattern(s), no matches in tracked files or file names.", patterns.len());
+        Ok(())
+    } else {
+        eprintln!("{}", hits.join("\n"));
+        Err(format!("{} tracked line(s), binary file(s) or file name(s) match the privacy denylist (listed above)", hits.len()).into())
+    }
+}
+
+/// Where `privacy` lists the tracked paths for the file-name check (under the git-ignored `target`).
+const PATH_LIST: &str = "target/xtask-privacy-paths.txt";
+
+/// `git grep -n -i -P` with every pattern, reduced to `path:line` by `locations`; an empty list means no match.
+fn grep(root: &Path, patterns: &[(usize, String)], tail: &[&str]) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let mut command = Command::new("git");
-    command.current_dir(root).args(["grep", "-n", "-I", "-i", "-P"]);
-    for (_, pattern) in &patterns {
+    command.current_dir(root).args(["grep", "-n", "-i", "-P"]);
+    for (_, pattern) in patterns {
         command.args(["-e", pattern]);
     }
-    command.args(["--", ".", ":(exclude,glob)**/Cargo.lock", ":(exclude,glob)**/package-lock.json"]);
+    command.args(tail);
     // stderr is discarded: on failure it can echo the private patterns into CI logs.
     let output = command.stderr(Stdio::null()).output()?;
     match output.status.code() {
-        Some(0) => {
-            let hits = locations(&String::from_utf8_lossy(&output.stdout));
-            eprintln!("{}", hits.join("\n"));
-            Err(format!("{} tracked line(s) match the privacy denylist (file:line listed above)", hits.len()).into())
-        }
-        Some(1) => {
-            println!("Privacy guard passed: {} pattern(s), no matches in tracked files.", patterns.len());
-            Ok(())
-        }
+        Some(0) => Ok(locations(&String::from_utf8_lossy(&output.stdout))),
+        Some(1) => Ok(Vec::new()),
         code => Err(format!("the privacy search failed (exit status {})", code.map_or_else(|| "unknown".to_owned(), |c| c.to_string())).into()),
     }
+}
+
+/// The line numbers in `path:line` locations.
+fn line_numbers(locations: &[String]) -> Vec<usize> {
+    locations.iter().filter_map(|location| location.rsplit(':').next()?.parse().ok()).collect()
 }
 
 #[cfg(test)]
@@ -164,6 +191,12 @@ mod tests {
     #[test]
     fn locations_drop_the_matched_text() {
         assert_eq!(locations("src/a.rs:12:let x = 1: y\nREADME.md:3:text\n"), ["src/a.rs:12", "README.md:3"]);
+        assert_eq!(locations("Binary file icon.png matches\n"), ["Binary file icon.png matches"]);
+    }
+
+    #[test]
+    fn line_numbers_come_from_the_locations() {
+        assert_eq!(line_numbers(&locations("target/list.txt:3:a/zzqq.png\ntarget/list.txt:12:b\n")), [3, 12]);
     }
 
     #[test]

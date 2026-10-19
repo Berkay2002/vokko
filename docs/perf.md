@@ -172,7 +172,7 @@ on a channel link, it checks whether the newest message sits at the bottom of th
 frame, frames that showed rows in the wrong place, and whether the bottom held for the next 30 frames. Channels with 6 messages, 40
 (one page) and `#firehose`; cold = first open, warm = median of 9 reopens.
 
-The revert in 7146388e (back to `initialTopMostItemIndex`) was not a list bug: the system-messages spec right-clicked the third
+The revert in bcc31bba (back to `initialTopMostItemIndex`) was not a list bug: the system-messages spec right-clicked the third
 rendered row, which sits above the viewport, so Playwright scrolled the list up. On main a late height change pulled it back down. With
 `initialScrollTop` the layout was already settled, so the scroll stuck. The spec now right-clicks a row that is on screen. A new test in
 messages.spec checks that the list stays at the bottom after a dialog opens and closes.

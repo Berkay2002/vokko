@@ -313,11 +313,13 @@ fn spam_text(content: &str) -> Option<String> {
 
 /// SPAM rule: the same text (case-insensitive, at least [`SPAM_MIN_CHARS`] characters) from one member for the
 /// [`SPAM_REPEATS`]th time within [`SPAM_WINDOW_MS`] anywhere in the guild. The copies before it were already posted.
+/// A stored forward has empty `content`, so its snapshot text counts instead: repeated forwards count like repeated sends.
 async fn is_repeat_spam(state: &AppState, guild_id: i64, user_id: i64, text: &str) -> ApiResult<bool> {
     let since = crate::ids::at(crate::ids::now_ms().saturating_sub(SPAM_WINDOW_MS), 0, 0);
     let (count,): (i64,) = sqlx::query_as(
         "SELECT count(*) FROM messages m JOIN channels c ON c.id = m.channel_id \
-         WHERE m.author_id = $1 AND m.id > $2 AND c.guild_id = $3 AND lower(btrim(m.content)) = $4",
+         WHERE m.author_id = $1 AND m.id > $2 AND c.guild_id = $3 \
+         AND lower(btrim(COALESCE(NULLIF(m.content, ''), m.snapshot->'message'->>'content', ''))) = $4",
     )
     .bind(user_id)
     .bind(since)

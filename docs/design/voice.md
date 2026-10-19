@@ -47,7 +47,7 @@ command endpoint"). vokko-server only issues tokens, keeps the voice-state table
    `VOICE_SERVER_UPDATE {guild_id, channel_id, endpoint, token}` to the requesting gateway session only, and broadcasts
    `VOICE_STATE_UPDATE` to everyone who can see the channel (Discord shows the user in the channel immediately; so do we).
 4. The client connects with `livekit-client`. LiveKit fires `participant_joined` → server marks the state `connected`.
-   If no `participant_joined` arrives within **15 s**, the server drops the state and broadcasts `channel_id: null`.
+   If no `participant_joined` arrives within `VOKKO_VOICE_CONNECT_TIMEOUT_SECS` (default **30 s**), the server drops the state and broadcasts `channel_id: null`.
 5. Mute/deafen/video toggles are op 4 with the same `channel_id` (no new token unless the grant changes).
 
 ### 1.3 Token minting (grants from permissions)
@@ -91,9 +91,9 @@ is the base64 SHA-256 of the body; reject anything else with 401. Events used:
 | Event | Effect |
 | --- | --- |
 | `participant_joined` | state `connected = true` (match identity + room + `metadata.session_id`; stale session → `RemoveParticipant`) |
-| `participant_left` | if the session matches the current state: remove it and broadcast `channel_id: null` |
+| `participant_left` | if the session, the latest token and the last joined participant `sid` match the current state: remove it and broadcast `channel_id: null` |
 | `track_published` / `track_unpublished` | set `self_video` (source camera) / `self_stream` (source screen_share) from truth, broadcast; screenshare above the guild's cap → `MutePublishedTrack` (§4.4) |
-| `room_finished` | sweep any states still pointing at the room; end the DM call if it was one (§4.2) |
+| `room_finished` | sweep the connected states still pointing at the room on that backend, except those that connected after the event was created (a late event about an earlier instance of the room); end the DM call if it was one (§4.2) |
 
 Webhooks can arrive late, twice or out of order: handlers are idempotent, keyed by participant `sid`, and ignore events older
 than the state's `connected_at`. A reconciliation task calls `ListParticipants` for rooms with live states every 60 s and on
@@ -566,7 +566,7 @@ reconnect. Acceptance:
 - Join broadcasts VOICE_STATE_UPDATE only to sessions that can see the channel (a member denied VIEW_CHANNEL receives nothing).
 - `user_limit` reached → `channel_full`; MOVE_MEMBERS holder still joins.
 - Webhook with a bad signature → 401 and no state change; duplicated / out-of-order `participant_left` does not drop a newer
-  session; no `participant_joined` in 15 s → state removed and `channel_id: null` broadcast.
+  session; no `participant_joined` within the connect timeout (default 30 s) → state removed and `channel_id: null` broadcast.
 - Second gateway session joining voice moves the state (old session sees the new `session_id`).
 - Server restart with a fake RoomService listing participants → voice states restored, no leave events emitted.
 - Client: voice store reducer tests from event sequences; VAD gate tests with synthetic level sequences (opens above

@@ -1178,3 +1178,34 @@ async fn component_clicks_respect_who_may_see_and_answer_the_message() {
     let (status, _) = click(&app, &member, &app_id, &channel, &id(&public), json!({"custom_id": "go", "component_type": 2})).await;
     assert!(status.is_client_error(), "{status}");
 }
+
+#[tokio::test]
+async fn autocomplete_callback_rejects_bad_choices_before_claiming() {
+    let app = TestApp::new().await;
+    let address = app.serve().await;
+    let (owner, _) = app.register("owner").await;
+    let (guild, channel) = app.guild_with_channel(&owner).await;
+    let (app_id, bot) = create_app(&app, &owner, "Echo").await;
+    let commands = echo_commands(&app, &bot, &app_id).await;
+    add_bot(&app, &owner, &app_id, &guild).await;
+    let mut bot_gateway = Client::connect(&address, &bot).await;
+    let (status, _) = app
+        .post(
+            "/interactions",
+            &owner,
+            json!({"type": 4, "application_id": app_id, "channel_id": channel, "nonce": "n1",
+                   "data": {"id": command(&commands, "echo")["id"], "name": "echo", "type": 1, "options": [{"name": "text", "type": 3, "value": "h", "focused": true}]}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let interaction = bot_gateway.wait_for("INTERACTION_CREATE").await;
+    let callback = format!("/interactions/{}/{}/callback", id(&interaction), interaction["token"].as_str().expect("token"));
+    for choice in [json!({"name": "x".repeat(101), "value": "x"}), json!({"name": "x", "value": {"a": 1}}), json!({"name": "x", "value": ""})] {
+        let (status, error) = app.send(Method::POST, &callback, None, Some(json!({"type": 8, "data": {"choices": [choice]}}))).await;
+        assert_eq!((status, error["code"].as_u64()), (StatusCode::BAD_REQUEST, Some(50035)), "{choice}");
+    }
+    // the rejected bodies did not claim the interaction
+    let choices = json!([{"name": "hello", "value": "hello"}, {"name": "six", "value": 6}]);
+    let (status, _) = app.send(Method::POST, &callback, None, Some(json!({"type": 8, "data": {"choices": choices}}))).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+}

@@ -110,6 +110,12 @@ async fn create(
     let sticker_id = state.ids.next();
     let path = media::asset_path(attachment, &key, &filename);
     let mut tx = state.db.begin().await?;
+    // Serialises concurrent uploads to one guild so the cap holds.
+    sqlx::query("SELECT id FROM guilds WHERE id = $1 FOR UPDATE").bind(id).execute(&mut *tx).await?;
+    let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM stickers WHERE guild_id = $1").bind(id).fetch_one(&mut *tx).await?;
+    if count as usize >= state.config.max_stickers_per_guild {
+        return Err(ApiErr::conflict(30039, "Maximum number of stickers reached"));
+    }
     let claimed = sqlx::query("UPDATE attachments SET claimed_at = now(), sticker_asset = TRUE WHERE id = $1 AND claimed_at IS NULL AND message_id IS NULL")
         .bind(attachment)
         .execute(&mut *tx)

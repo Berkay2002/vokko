@@ -26,15 +26,27 @@ psql "$url" -q -v ON_ERROR_STOP=1 -c "create table backup_probe (id bigint prima
     insert into backup_probe select g, sha256(g::text::bytea) from generate_series(1, 5000) g;
     insert into users (id, username, email, password_hash) select g, 'u' || g, g || '@test', 'x' from generate_series(1, 50) g;
     insert into guilds (id, name, owner_id) select g, 'guild ' || g, g from generate_series(1, 10) g;"
-mkdir -p "$work/data/attachments/1" "$work/data/incoming"
+mkdir -p "$work/data/attachments/1" "$work/data/incoming" "$work/data/embed-media"
 head -c 100000 /dev/urandom >"$work/data/attachments/1/a.bin"
 echo partial >"$work/data/incoming/skip-me"
+echo cached >"$work/data/embed-media/skip-me"
 
 before=$(counts)
 export VOKKO_BACKUP_DATABASE_URL=$url VOKKO_BACKUP_DATA_DIR=$work/data VOKKO_BACKUP_DIR=$work/backups VOKKO_BACKUP_DAILY=2
 for _ in 1 2 3; do "$here/backup.sh" && sleep 1; done
 [ "$(ls "$work/backups/daily" | wc -l)" -eq 2 ] || { echo "FAIL: rotation kept $(ls "$work/backups/daily")" >&2; exit 1; }
 [ "$(ls "$work/backups/weekly" | wc -l)" -eq 1 ] || { echo "FAIL: weekly has $(ls "$work/backups/weekly")" >&2; exit 1; }
+
+# Offsite: a normal run mirrors; a run on an emptied backup dir must refuse and leave the offsite history alone.
+mkdir "$work/offsite"
+VOKKO_BACKUP_OFFSITE=$work/offsite "$here/backup.sh"
+[ "$(ls "$work/offsite/daily" | wc -l)" -eq 2 ] || { echo "FAIL: offsite has $(ls "$work/offsite/daily")" >&2; exit 1; }
+mkdir "$work/offsite/daily/20000101-000001" "$work/offsite/daily/20000101-000002" "$work/offsite/daily/20000101-000003"
+mv "$work/backups" "$work/backups.kept"
+if VOKKO_BACKUP_OFFSITE=$work/offsite "$here/backup.sh"; then echo "FAIL: synced an emptied backup dir offsite" >&2; exit 1; fi
+[ "$(ls "$work/offsite/daily" | wc -l)" -eq 5 ] || { echo "FAIL: offsite lost sets: $(ls "$work/offsite/daily")" >&2; exit 1; }
+rm -rf "$work/backups"
+mv "$work/backups.kept" "$work/backups"
 
 sum=$(cksum <"$work/data/attachments/1/a.bin")
 psql "$url" -q -c "drop table backup_probe; truncate users cascade"
@@ -45,4 +57,5 @@ after=$(counts)
 [ "$before" = "$after" ] || { diff <(echo "$before") <(echo "$after") >&2; echo "FAIL: row counts differ" >&2; exit 1; }
 [ "$(cksum <"$work/data/attachments/1/a.bin")" = "$sum" ] || { echo "FAIL: attachment differs" >&2; exit 1; }
 [ ! -e "$work/data/incoming" ] || { echo "FAIL: incoming/ was backed up" >&2; exit 1; }
+[ ! -e "$work/data/embed-media" ] || { echo "FAIL: embed-media/ was backed up" >&2; exit 1; }
 echo "PASS: $(echo "$after" | wc -l) tables, $(echo "$after" | awk -F'|' '{s += $2} END {print s}') rows and the uploads restored"

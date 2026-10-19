@@ -37,14 +37,72 @@ impl ForwardDraft {
     }
 }
 
+/// A checked forward before its files are copied: `content` still lists the source's attachments.
+pub struct ForwardSource {
+    pub source_channel: i64,
+    pub source_guild: Option<i64>,
+    pub source_message: i64,
+    pub content: MessageSnapshotContent,
+    pub stickers: Vec<StickerRef>,
+}
+
+/// Removes a forward's file copies when the send is dropped (the client went away) before they were stored. The ones an
+/// attachment row already references belong to a committed message and stay. [`CopyGuard::disarm`] once the insert returned.
+pub struct CopyGuard {
+    state: AppState,
+    /// The target channel: the insert holds its row lock until the transaction ends.
+    channel: i64,
+    ids: Vec<i64>,
+}
+
+impl CopyGuard {
+    pub fn new(state: &AppState, channel: i64) -> Self {
+        Self { state: state.clone(), channel, ids: Vec::new() }
+    }
+
+    /// A copy about to be written: removed with the others if the request is dropped.
+    pub fn track(&mut self, id: i64) {
+        self.ids.push(id);
+    }
+
+    pub fn disarm(mut self) {
+        self.ids.clear();
+    }
+}
+
+impl Drop for CopyGuard {
+    fn drop(&mut self) {
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else { return };
+        if self.ids.is_empty() {
+            return;
+        }
+        let (state, channel, ids) = (self.state.clone(), self.channel, std::mem::take(&mut self.ids));
+        runtime.spawn(async move {
+            // A send dropped at its COMMIT may still commit: wait for its transaction (it holds the channel row from its
+            // last_message_id update) before asking which copies a row references, or a committed forward loses its files.
+            let stored: Result<Vec<(i64,)>, sqlx::Error> = async {
+                let mut tx = state.db.begin().await?;
+                sqlx::query("SELECT id FROM channels WHERE id = $1 FOR SHARE").bind(channel).execute(&mut *tx).await?;
+                sqlx::query_as("SELECT id FROM attachments WHERE id = ANY($1)").bind(&ids).fetch_all(&mut *tx).await
+            }
+            .await;
+            let stored = match stored {
+                Ok(stored) => stored,
+                Err(error) => return tracing::warn!(%error, "cannot check a dropped forward's file copies"),
+            };
+            let orphans: Vec<i64> = ids.into_iter().filter(|id| !stored.iter().any(|(stored,)| stored == id)).collect();
+            media::remove_files(&state, &orphans).await;
+        });
+    }
+}
+
 /// Every reason the caller cannot read the source looks the same as the message not existing.
 fn unreadable() -> ApiErr {
     ApiErr::unknown_message()
 }
 
 /// Checks that `user_id` may read the source message and may post this content in the target channel (`target_permissions`),
-/// then builds the snapshot, copying the attachment files. Nothing is copied when a check fails, and a failure while copying
-/// removes what was copied so far.
+/// and reads the snapshot. Nothing is copied yet: [`ForwardSource::copy`] does that once the send passed its other checks.
 pub async fn prepare(
     state: &AppState,
     user_id: i64,
@@ -52,7 +110,7 @@ pub async fn prepare(
     source_message: i64,
     target: &ChannelRow,
     target_permissions: u64,
-) -> ApiResult<ForwardDraft> {
+) -> ApiResult<ForwardSource> {
     let access = channel_access(state, user_id, source_channel).await.map_err(|_| unreadable())?;
     if access.permissions & READ_MESSAGE_HISTORY == 0 {
         return Err(unreadable());
@@ -73,7 +131,7 @@ pub async fn prepare(
     let view = store::message_view(state, source_message, None).await?.ok_or_else(unreadable)?;
     let message = view.message;
     // Forwarding a forward copies what it showed.
-    let mut content = match message.message_snapshots.into_iter().next() {
+    let content = match message.message_snapshots.into_iter().next() {
         Some(snapshot) => snapshot.message,
         None => MessageSnapshotContent {
             kind: MessageType::Default,
@@ -116,52 +174,59 @@ pub async fn prepare(
             return Err(ApiErr::missing_permissions());
         }
     }
+    Ok(ForwardSource { source_channel, source_guild: access.channel.guild_id, source_message, content, stickers })
+}
 
-    let originals = std::mem::take(&mut content.attachments);
-    let mut copies: Vec<AttachmentCopy> = Vec::new();
-    let mut attachments: Vec<Attachment> = Vec::new();
-    // Files are write-once, so the local backend may share them with a hard link.
-    for original in originals {
-        let new_id = state.ids.next();
-        match state.storage.copy(original.id.db(), new_id).await {
-            Ok(()) => {}
-            // The file is gone: drop it from the copy rather than point at a dead link.
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => {
-                // A failed copy can leave a partial target behind (a local copy that ran out of space).
-                let mut written: Vec<i64> = copies.iter().map(|copy| copy.id).collect();
-                written.push(new_id);
-                media::remove_files(state, &written).await;
-                return Err(error.into());
+impl ForwardSource {
+    /// Builds the snapshot, copying the attachment files into `guard` (so a request dropped mid-copy leaves none behind); a
+    /// failure while copying removes what was copied so far.
+    pub async fn copy(self, state: &AppState, guard: &mut CopyGuard) -> ApiResult<ForwardDraft> {
+        let Self { source_channel, source_guild, source_message, mut content, stickers } = self;
+        let originals = std::mem::take(&mut content.attachments);
+        let mut copies: Vec<AttachmentCopy> = Vec::new();
+        let mut attachments: Vec<Attachment> = Vec::new();
+        // Files are write-once, so the local backend may share them with a hard link.
+        for original in originals {
+            let new_id = state.ids.next();
+            guard.track(new_id);
+            match state.storage.copy(original.id.db(), new_id).await {
+                Ok(()) => {}
+                // The file is gone: drop it from the copy rather than point at a dead link.
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => {
+                    // A failed copy can leave a partial target behind (a local copy that ran out of space).
+                    media::remove_files(state, &std::mem::take(&mut guard.ids)).await;
+                    return Err(error.into());
+                }
             }
+            let key = media::new_key();
+            let mut copy = store::attachment_api(
+                state,
+                new_id,
+                &key,
+                original.filename.clone(),
+                original.content_type.clone(),
+                original.size as i64,
+                original.width.map(|value| value as i32),
+                original.height.map(|value| value as i32),
+            );
+            copy.description = original.description.clone();
+            // The snapshot keeps the voice-message player data; the copied row itself does not need it.
+            copy.duration_secs = original.duration_secs;
+            copy.waveform = original.waveform.clone();
+            attachments.push(copy);
+            copies.push(AttachmentCopy {
+                id: new_id,
+                key,
+                filename: original.filename,
+                content_type: original.content_type,
+                size: original.size,
+                width: original.width,
+                height: original.height,
+                description: original.description,
+            });
         }
-        let key = media::new_key();
-        let mut copy = store::attachment_api(
-            state,
-            new_id,
-            &key,
-            original.filename.clone(),
-            original.content_type.clone(),
-            original.size as i64,
-            original.width.map(|value| value as i32),
-            original.height.map(|value| value as i32),
-        );
-        copy.description = original.description.clone();
-        // The snapshot keeps the voice-message player data; the copied row itself does not need it.
-        copy.duration_secs = original.duration_secs;
-        copy.waveform = original.waveform.clone();
-        attachments.push(copy);
-        copies.push(AttachmentCopy {
-            id: new_id,
-            key,
-            filename: original.filename,
-            content_type: original.content_type,
-            size: original.size,
-            width: original.width,
-            height: original.height,
-            description: original.description,
-        });
+        let snapshot = MessageSnapshot { message: MessageSnapshotContent { attachments, ..content } };
+        Ok(ForwardDraft { source_channel, source_guild, source_message, snapshot, copies, stickers })
     }
-    let snapshot = MessageSnapshot { message: MessageSnapshotContent { attachments, ..content } };
-    Ok(ForwardDraft { source_channel, source_guild: access.channel.guild_id, source_message, snapshot, copies, stickers })
 }

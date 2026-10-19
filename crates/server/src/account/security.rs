@@ -30,7 +30,8 @@ const BACKUP_ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
 /// Wrong second-factor codes (or, counted apart, current passwords) per account before 429, and the window they count in.
 const MAX_FAILURES: i64 = 10;
 const FAILURE_WINDOW_SECONDS: f64 = 900.0;
-const RESET_COOLDOWN_SECONDS: f64 = 60.0;
+/// At most one reset mail a minute per account.
+const RESET_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(60);
 
 fn invalid_code() -> ApiErr {
     ApiErr::invalid("code", "Invalid two-factor code")
@@ -121,7 +122,16 @@ pub(super) async fn begin_attempt(state: &AppState, table: &str, user_id: i64, r
     if attempts > MAX_FAILURES {
         // a refused request is not an attempt: it must not keep extending the lockout
         sqlx::query(&format!("DELETE FROM {table} WHERE id = $1")).bind(attempt).execute(&state.db).await?;
-        return Err(ApiErr { status: StatusCode::TOO_MANY_REQUESTS, body: ApiError { code: 0, message: refused.to_owned(), errors: None }, retry_after: None });
+        // the oldest counted failure leaving the window: exact at MAX_FAILURES + 1, a lower bound past that
+        let (left,): (Option<f64>,) = sqlx::query_as(&format!(
+            "SELECT EXTRACT(EPOCH FROM (min(failed_at) + make_interval(secs => $2) - now()))::float8 FROM {table} WHERE user_id = $1 AND failed_at > now() - make_interval(secs => $2)"
+        ))
+        .bind(user_id)
+        .bind(FAILURE_WINDOW_SECONDS)
+        .fetch_one(&state.db)
+        .await?;
+        let retry_after = Some(left.unwrap_or(1.0).max(1.0));
+        return Err(ApiErr { status: StatusCode::TOO_MANY_REQUESTS, body: ApiError { code: 0, message: refused.to_owned(), errors: None }, retry_after });
     }
     Ok(attempt)
 }
@@ -314,19 +324,10 @@ async fn send_reset(state: &AppState, login: &str) -> ApiResult<()> {
     let row: Option<(i64, String)> =
         sqlx::query_as("SELECT id, email FROM users WHERE (username = $1 OR email = $1) AND deleted_at IS NULL").bind(login).fetch_optional(&state.db).await?;
     if let Some((user_id, email)) = row {
-        // at most one reset mail a minute per account
-        let (recent,): (bool,) = sqlx::query_as(
-            "SELECT EXISTS (SELECT 1 FROM email_tokens WHERE user_id = $1 AND purpose = 'reset' \
-             AND expires_at > now() + make_interval(secs => $2))",
-        )
-        .bind(user_id)
-        .bind(tokens::RESET_TTL.as_secs_f64() - RESET_COOLDOWN_SECONDS)
-        .fetch_one(&state.db)
-        .await?;
-        if recent {
-            return Ok(());
-        }
-        let token = tokens::issue(state, user_id, Purpose::Reset, &email, tokens::RESET_TTL).await?;
+        let token = match tokens::issue(state, user_id, Purpose::Reset, &email, tokens::RESET_TTL, Some(RESET_COOLDOWN)).await {
+            Err(error) if error.retry_after.is_some() => return Ok(()), // the cooldown: the earlier mail stands
+            token => token?,
+        };
         let body = format!(
             "Someone asked to reset the password of your Vokko account. Open this link within an hour to choose a new one:\n\n{}\n\nIf this wasn't you, ignore this mail; your password stays the same.",
             link(state, "reset", &token)
@@ -348,11 +349,12 @@ pub async fn reset_password(State(state): State<AppState>, headers: HeaderMap, A
     let invalid = || ApiErr::invalid("token", "This link is invalid or has expired.");
     let Some((user_id, username, email)) = row else { return Err(invalid()) };
     rules::password(&body.password, &[&username, &email])?;
+    // hash before using up the link too: a busy server's 429 leaves the link for the retry
+    let hash = hash_password(body.password).await?;
     let Some((consumed_user, sent_to)) = tokens::consume(&state, &body.token, Purpose::Reset).await? else { return Err(invalid()) };
     if consumed_user != user_id {
         return Err(invalid());
     }
-    let hash = hash_password(body.password).await?;
     let mut tx = state.db.begin().await?;
     // the row lock orders this after any verification that moves the account; the link only counts for the address it went to
     let current: Option<(String,)> = sqlx::query_as("SELECT email FROM users WHERE id = $1 FOR UPDATE").bind(user_id).fetch_optional(&mut *tx).await?;

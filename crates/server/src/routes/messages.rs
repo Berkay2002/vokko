@@ -269,12 +269,24 @@ pub async fn insert_message(state: &AppState, channel: &ChannelRow, author_id: i
 }
 
 pub async fn insert_message_with(state: &AppState, channel: &ChannelRow, author_id: i64, draft: Draft, extras: Extras) -> ApiResult<MessageView> {
+    insert_message_tracked(state, channel, author_id, draft, extras, &mut false).await
+}
+
+/// [`insert_message_with`] that sets `committed` once the message is stored: an error after that (DM reopen, loading the view)
+/// comes from a message that was posted all the same.
+async fn insert_message_tracked(
+    state: &AppState,
+    channel: &ChannelRow,
+    author_id: i64,
+    draft: Draft,
+    extras: Extras,
+    committed: &mut bool,
+) -> ApiResult<MessageView> {
     // Files copied for a forward belong to the message only once it is committed: an error before that deletes them, an error
-    // after it (DM reopen, loading the view) must not, or the saved forward would point at deleted files.
+    // after it must not, or the saved forward would point at deleted files.
     let copies = draft.forward.as_ref().map(ForwardDraft::copy_ids).unwrap_or_default();
-    let mut committed = false;
-    let result = insert_message_stored(state, channel, author_id, draft, extras, &mut committed).await;
-    if result.is_err() && !committed {
+    let result = insert_message_stored(state, channel, author_id, draft, extras, committed).await;
+    if result.is_err() && !*committed {
         media::remove_files(state, &copies).await;
     }
     result
@@ -687,7 +699,9 @@ async fn create_message(
             if forwarding || !sticker_ids.is_empty() {
                 return Err(ApiErr::invalid("poll", "A poll message cannot carry stickers or be a forward."));
             }
-            Some(polls::validate(request)?)
+            let mut draft = polls::validate(request)?;
+            polls::resolve_emojis(&state, user_id, &access, &mut draft).await?;
+            Some(draft)
         }
         None => None,
     };
@@ -738,22 +752,22 @@ async fn create_message(
     let ping_replied = body.allowed_mentions.as_ref().and_then(|allowed| allowed.replied_user).unwrap_or(true);
     let kind = if reference.is_some() { MessageType::Reply } else { MessageType::Default };
     let mentions = if forwarding { Resolved { users: Vec::new(), roles: Vec::new(), everyone: false } } else { mentions };
-    // AutoMod after the request is validated, so a blocked message ran into no other error first; its alert and timeout wait for
-    // the insert. Slowmode deliberately comes after it: a blocked message must not use up the member's slowmode slot.
-    let screening = crate::safety::check_send(&state, &access, user_id, &screened, &content).await?;
-    check_slowmode(&state, &access, user_id).await?;
-    // Last step before the insert: it copies files, and nothing after it may fail without cleaning them up.
+    // A forward's source is checked and read here; its files are copied only once every other check passed.
     let forward = match forward_source {
         Some((source_channel, source_message)) => {
             Some(forward::prepare(&state, user_id, source_channel, source_message, &access.channel, access.permissions).await?)
         }
         None => None,
     };
-    let draft = Draft { content, kind, reference, attachments, nonce: body.nonce, mentions, ping_replied, stickers, forward };
-    // Everything is validated: a message into a thread reopens it if it is archived (the UPDATE's `AND archived` guards it, and
-    // deciding inside the transaction closes the race with the auto-archive sweep) together with the insert.
+    // A forward is screened on the content it copies, like the same text sent as a message.
+    let (screened, plain) = match &forward {
+        Some(forward) => (forward.content.content.clone(), forward.content.content.clone()),
+        None => (screened, content.clone()),
+    };
     // Without SEND_TTS_MESSAGES the flag is dropped and the message is sent as usual (Discord does the same).
     let tts = body.tts.unwrap_or(false) && access.permissions & vokko_protocol::api::permissions::SEND_TTS_MESSAGES != 0;
+    // A message into a thread reopens it if it is archived (the UPDATE's `AND archived` guards it, and deciding inside the
+    // transaction closes the race with the auto-archive sweep) together with the insert.
     let extras = Extras {
         reopen_thread: access.channel.is_thread(),
         poll,
@@ -763,7 +777,44 @@ async fn create_message(
         components: components.as_ref().map(serde_json::to_string).transpose().map_err(|_| ApiErr::internal())?,
         ..Extras::default()
     };
-    let view = insert_message_with(&state, &access.channel, user_id, draft, extras).await?;
+    // AutoMod (after the rules and verification gates) once the request is validated, so a blocked message ran into no other error
+    // first; its alert and timeout wait for the insert. Slowmode deliberately comes after it: a blocked message must not use up the
+    // member's slowmode slot.
+    let screening = crate::safety::check_send(&state, &access, user_id, &screened, &plain).await?;
+    let slot = check_slowmode(&state, &access, user_id).await?;
+    let release = async || {
+        if let Some(sent_at) = slot {
+            release_slowmode(&state, &access, user_id, sent_at).await;
+        }
+    };
+    // Last: the file copies. The guard removes them if this request is dropped before the insert stored them.
+    let mut copies = forward::CopyGuard::new(&state, access.channel.id);
+    let forward = match forward {
+        Some(source) => match source.copy(&state, &mut copies).await {
+            Ok(forward) => Some(forward),
+            Err(error) => {
+                release().await;
+                return Err(error);
+            }
+        },
+        None => None,
+    };
+    let draft = Draft { content, kind, reference, attachments, nonce: body.nonce, mentions, ping_replied, stickers, forward };
+    let mut committed = false;
+    let inserted = insert_message_tracked(&state, &access.channel, user_id, draft, extras, &mut committed).await;
+    // insert_message_with removed the copies itself if it failed before storing them
+    copies.disarm();
+    let view = match inserted {
+        Ok(view) => view,
+        Err(error) => {
+            // A rejected insert (an unknown or already used attachment) gives the slowmode slot back; a message that was stored
+            // before the error keeps it.
+            if !committed {
+                release().await;
+            }
+            return Err(error);
+        }
+    };
     screening.act(&state).await;
     if access.channel.is_thread() {
         // Talking in a thread joins it.
@@ -774,22 +825,23 @@ async fn create_message(
 
 /// Slowmode: one message per `rate_limit_per_user` seconds per author, unless they may bypass it (BYPASS_SLOWMODE, MANAGE_MESSAGES or
 /// MANAGE_CHANNELS, like Discord). Claiming the slot is one upsert, so two sends racing each other cannot both get through.
-async fn check_slowmode(state: &AppState, access: &ChannelAccess, user_id: i64) -> ApiResult<()> {
+/// Returns the claimed slot's `sent_at`, if a slot was claimed, for [`release_slowmode`].
+async fn check_slowmode(state: &AppState, access: &ChannelAccess, user_id: i64) -> ApiResult<Option<time::OffsetDateTime>> {
     let seconds = access.channel.rate_limit_per_user;
     if seconds <= 0 || access.permissions & (BYPASS_SLOWMODE | MANAGE_MESSAGES | MANAGE_CHANNELS) != 0 {
-        return Ok(());
+        return Ok(None);
     }
-    let claimed: Option<(i64,)> = sqlx::query_as(
+    let claimed: Option<(time::OffsetDateTime,)> = sqlx::query_as(
         "INSERT INTO slowmode_sends (channel_id, user_id, sent_at) VALUES ($1, $2, now()) ON CONFLICT (channel_id, user_id) DO UPDATE SET sent_at = now() \
-         WHERE slowmode_sends.sent_at <= now() - make_interval(secs => $3) RETURNING channel_id",
+         WHERE slowmode_sends.sent_at <= now() - make_interval(secs => $3) RETURNING sent_at",
     )
     .bind(access.channel.id)
     .bind(user_id)
     .bind(f64::from(seconds))
     .fetch_optional(&state.db)
     .await?;
-    if claimed.is_some() {
-        return Ok(());
+    if let Some((sent_at,)) = claimed {
+        return Ok(Some(sent_at));
     }
     let (left,): (f64,) = sqlx::query_as(
         "SELECT GREATEST(EXTRACT(EPOCH FROM sent_at + make_interval(secs => $3) - now())::float8, 0) FROM slowmode_sends WHERE channel_id = $1 AND user_id = $2",
@@ -800,6 +852,20 @@ async fn check_slowmode(state: &AppState, access: &ChannelAccess, user_id: i64) 
     .fetch_one(&state.db)
     .await?;
     Err(ApiErr::slowmode((left * 1000.0).ceil() / 1000.0))
+}
+
+/// Gives back a slot [`check_slowmode`] claimed for a send that then failed. Deleting is the same as restoring the old row, which had
+/// already expired when the slot was claimed; matching `sent_at` leaves a newer claim alone. Best effort: a failure keeps the wait.
+async fn release_slowmode(state: &AppState, access: &ChannelAccess, user_id: i64, sent_at: time::OffsetDateTime) {
+    let released = sqlx::query("DELETE FROM slowmode_sends WHERE channel_id = $1 AND user_id = $2 AND sent_at = $3")
+        .bind(access.channel.id)
+        .bind(user_id)
+        .bind(sent_at)
+        .execute(&state.db)
+        .await;
+    if let Err(error) = released {
+        tracing::warn!(%error, "could not release a slowmode slot");
+    }
 }
 
 async fn message_in_channel(state: &AppState, channel: i64, message: i64) -> ApiResult<MessageRow> {

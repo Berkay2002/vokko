@@ -368,3 +368,38 @@ async fn a_poll_cannot_carry_stickers_or_be_a_forward_and_cannot_be_forwarded() 
     let (status, error) = w.app.post(&format!("/channels/{second}/messages"), &w.owner.token, json!({"message_reference": reference})).await;
     assert_eq!((status, code(&error)), (StatusCode::BAD_REQUEST, Some(50035)), "{error}");
 }
+
+/// Creates a "party" emoji in the guild (as the owner), restricted to `roles`; returns its id.
+async fn guild_emoji(w: &World, roles: Value) -> String {
+    let attachment = w.upload_png(&w.general, &w.owner, "e.png").await;
+    let body = json!({"name": "party", "image_attachment_id": attachment, "roles": roles});
+    let (status, emoji) = w.app.post(&format!("/guilds/{}/emojis", w.guild), &w.owner.token, body).await;
+    assert_eq!(status, StatusCode::OK, "create emoji: {emoji}");
+    id(&emoji)
+}
+
+async fn poll_with_emoji(w: &World, user: &Member, emoji_id: &str) -> (StatusCode, Value) {
+    let answer = json!({"poll_media": {"text": "A", "emoji": {"id": emoji_id, "name": "fake_name"}}});
+    w.app.post(&format!("/channels/{}/messages", w.general), &user.token, json!({"poll": {"question": {"text": "Lunch?"}, "answers": [answer]}})).await
+}
+
+#[tokio::test]
+async fn custom_answer_emoji_must_exist_and_be_usable_by_the_author() {
+    let w = world().await;
+
+    // an id that is no emoji at all
+    let (status, error) = poll_with_emoji(&w, &w.alice, "123456789").await;
+    assert_eq!((status, code(&error)), (StatusCode::BAD_REQUEST, Some(10014)), "{error}");
+
+    // role-restricted: alice lacks the role
+    let role = w.role_for(&w.carol, 0).await;
+    let locked = guild_emoji(&w, json!([role])).await;
+    let (status, error) = poll_with_emoji(&w, &w.alice, &locked).await;
+    assert_eq!((status, code(&error)), (StatusCode::FORBIDDEN, Some(50013)), "{error}");
+
+    // the guild's own unrestricted emoji goes through, under its stored name
+    let open = guild_emoji(&w, json!([])).await;
+    let (status, message) = poll_with_emoji(&w, &w.alice, &open).await;
+    assert_eq!(status, StatusCode::OK, "{message}");
+    assert_eq!(message["poll"]["answers"][0]["poll_media"]["emoji"]["name"], "party");
+}

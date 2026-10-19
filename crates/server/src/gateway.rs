@@ -23,7 +23,7 @@ use crate::app_icons;
 use crate::auth::{hash_token, random_hex, user_for_token};
 use crate::error::{ApiErr, ApiResult};
 use crate::events;
-use crate::hub::{Link, LinkReceiver, ResumeOutcome, Session};
+use crate::hub::{Link, LinkReceiver, MAX_BOT_SESSIONS, MAX_USER_SESSIONS, ResumeOutcome, Session};
 use crate::net::client_ip;
 use crate::presence;
 use crate::routes::relationships::{open_dms, relationships_of};
@@ -143,7 +143,13 @@ async fn handle(state: AppState, socket: WebSocket, slot: PreauthSlot) {
         return;
     }
     let (link, mut receiver) = state.hub.new_link();
-    let Ok(Some((session, generation))) = tokio::time::timeout(state.config.handshake_timeout, handshake(&state, &mut writer, &mut stream, link)).await else {
+    let mut opened = None;
+    let handshake = tokio::time::timeout(state.config.handshake_timeout, handshake(&state, &mut writer, &mut stream, link, &mut opened)).await;
+    let Ok(Some((session, generation))) = handshake else {
+        // A timeout during the post-open re-check or `send_active` leaves an attached session that nothing would prune.
+        if let Some(session) = opened {
+            state.hub.remove_session(&session.id);
+        }
         return;
     };
     drop(slot);
@@ -169,7 +175,8 @@ async fn handle(state: AppState, socket: WebSocket, slot: PreauthSlot) {
 }
 
 /// Waits for Identify or Resume. `None` means the connection is over (bad token, socket closed).
-async fn handshake(state: &AppState, writer: &mut Writer, stream: &mut Stream, link: Link) -> Option<(Arc<Session>, u64)> {
+/// `opened` holds a session Identify registered, so `handle` can forget it if the handshake times out before returning it.
+async fn handshake(state: &AppState, writer: &mut Writer, stream: &mut Stream, link: Link, opened: &mut Option<Arc<Session>>) -> Option<(Arc<Session>, u64)> {
     let mut failed_resumes = 0;
     while let Some(Ok(message)) = stream.next().await {
         let Message::Text(text) = message else {
@@ -205,8 +212,11 @@ async fn handshake(state: &AppState, writer: &mut Writer, stream: &mut Stream, l
                         return None;
                     }
                 };
+                // `user_for_token` accepted the token, so a `Bot ` prefix means a bot account.
+                let max_sessions = if identify.token.starts_with("Bot ") { MAX_BOT_SESSIONS } else { MAX_USER_SESSIONS };
                 let (session, generation) =
-                    state.hub.open_session(user_id, session_id, hash_token(&identify.token), link, GatewayEvent::Ready(Box::new(ready)).data());
+                    state.hub.open_session(user_id, session_id, hash_token(&identify.token), link, GatewayEvent::Ready(Box::new(ready)).data(), max_sessions);
+                *opened = Some(session.clone());
                 // A revoke during build_ready deleted the token before this session was registered, so close_token_sessions
                 // missed it. Revokers delete the row before purging, so checking after registration closes the window.
                 if !matches!(user_for_token(state, &identify.token).await, Ok(Some(id)) if id == user_id) {
@@ -227,8 +237,8 @@ async fn handshake(state: &AppState, writer: &mut Writer, stream: &mut Stream, l
                     failed_resumes += 1;
                     continue;
                 };
-                // Unknown session ids (128-bit random) are answered without a database lookup.
-                let session = state.hub.session(&resume.session_id);
+                // Unknown or expired session ids (128-bit random) are answered without a database lookup.
+                let session = state.hub.resumable_session(&resume.session_id);
                 let owner = match &session {
                     Some(_) => user_for_token(state, &resume.token).await.ok().flatten(),
                     None => None,

@@ -5,12 +5,15 @@ use std::time::Duration;
 
 use sqlx::{Postgres, Transaction};
 use time::OffsetDateTime;
+use vokko_protocol::api::permissions::USE_EXTERNAL_EMOJIS;
 use vokko_protocol::api::{
     Embed, EmbedField, EmbedType, MessageType, POLL_ANSWER_MAX_CHARS, POLL_DEFAULT_DURATION_HOURS, POLL_LAYOUT_DEFAULT, POLL_MAX_ANSWERS,
     POLL_MAX_DURATION_HOURS, POLL_QUESTION_MAX_CHARS, Poll, PollAnswer, PollAnswerCount, PollCreateRequest, PollMedia, PollResults, ReactionEmoji, Snowflake,
     poll_result_fields as field,
 };
 
+use crate::access::ChannelAccess;
+use crate::emojis;
 use crate::error::{ApiErr, ApiResult};
 use crate::routes::messages::{self, Draft, Extras, Resolved};
 use crate::state::AppState;
@@ -86,6 +89,20 @@ pub fn validate(request: &PollCreateRequest) -> ApiResult<PollDraft> {
         return Err(ApiErr::invalid("poll.layout_type", "Unknown layout type."));
     }
     Ok(PollDraft { question, answers, duration_hours, allow_multiselect: request.allow_multiselect.unwrap_or(false), layout_type })
+}
+
+/// Checks each custom answer emoji like a reaction: it must exist and be usable by the author (emoji roles), another guild's emoji in a
+/// guild channel needs USE_EXTERNAL_EMOJIS, and the stored name replaces the client's.
+pub async fn resolve_emojis(state: &AppState, user_id: i64, access: &ChannelAccess, draft: &mut PollDraft) -> ApiResult<()> {
+    for emoji in draft.answers.iter_mut().filter_map(|answer| answer.emoji.as_mut()) {
+        let Some(id) = emoji.id else { continue };
+        let (name, _, emoji_guild) = emojis::usable_by(state, user_id, id.db()).await?;
+        if access.channel.guild_id.is_some_and(|guild_id| guild_id != emoji_guild) {
+            access.require(USE_EXTERNAL_EMOJIS)?;
+        }
+        emoji.name = name;
+    }
+    Ok(())
 }
 
 /// Stores the poll of a message inside the message's own insert transaction.

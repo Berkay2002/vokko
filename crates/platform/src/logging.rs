@@ -1,14 +1,14 @@
 //! The desktop app's logger: `log::` records go to standard error and to a log file.
 //!
-//! Without a logger every `log::warn!`/`log::error!` in the workspace (GPU startup fallbacks, a
-//! lost device, the crash guard's panic report) vanished. A launch from a desktop menu has no
-//! terminal, so the file is what a bug report can attach: `<settings dir>/logs/vokko.log`
+//! Without a logger every `log::warn!`/`log::error!` in the workspace (an unavailable tray
+//! icon, a refused download, the crash guard's panic report) vanished. A launch from a desktop
+//! menu has no terminal, so the file is what a bug report can attach: `<settings dir>/logs/vokko.log`
 //! (see `app_dirs`). Each start moves the previous log to `vokko.1.log` (and that one to
 //! `.2`), so the log of a run that crashed survives the next launch.
 //!
-//! Levels: `info` for Vokko's own crates, `warn` for everything else (wgpu and naga are
-//! chatty). `RUST_LOG` replaces that with env_logger-style directives: `debug`,
-//! `warn,vokko_gpu=trace`, `wgpu_core=info`. A directive ending in `*` matches every target
+//! Levels: `info` for Vokko's own crates, `warn` for everything else (Tauri, WebView and
+//! HTTP crates are chatty). `RUST_LOG` replaces that with env_logger-style directives: `debug`,
+//! `warn,vokko_desktop=trace`, `tao=info`. A directive ending in `*` matches every target
 //! that starts with it (`vokko*=debug`).
 //!
 //! Records logged before the settings directory is known are kept (up to [`MAX_PENDING`]) and

@@ -188,6 +188,21 @@ async fn sticker_count_is_limited_per_guild() {
 }
 
 #[tokio::test]
+async fn concurrent_sticker_creates_cannot_pass_the_cap() {
+    let w = world_with(|config| config.max_stickers_per_guild = 1).await;
+    let mut attachments = Vec::new();
+    for extra in 0..4 {
+        attachments.push(upload(&w.app, &w.owner, &w.channel, "s.png", &png(8, 8, extra)).await["id"].clone());
+    }
+    let path = format!("/guilds/{}/stickers", w.guild);
+    let results = futures_util::future::join_all(
+        attachments.iter().map(|id| w.app.post(&path, &w.owner, json!({"name": "race", "tags": "wave,hello", "attachment_id": id}))),
+    )
+    .await;
+    assert_eq!(results.iter().filter(|(status, _)| *status == StatusCode::OK).count(), 1, "exactly the cap got in");
+}
+
+#[tokio::test]
 async fn sending_stickers_follows_membership_and_external_sticker_permission() {
     let w = world().await;
     let (_, sticker) = w.sticker(&w.owner, &w.guild, "wave", &png(64, 64, 0)).await;
@@ -337,6 +352,70 @@ async fn forward_rejects_what_the_caller_cannot_read_with_the_unknown_message_an
     assert_eq!(status, StatusCode::BAD_REQUEST, "a forward carries no content");
     let (status, _) = w.say(&w.owner, second["id"].as_str().expect("id"), json!({"message_reference": {"type": 1, "message_id": open["id"]}})).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "a forward needs the source channel");
+}
+
+#[tokio::test]
+async fn automod_screens_a_forward_on_its_snapshot_and_removes_the_copies() {
+    let w = world().await;
+    let rule =
+        json!({"name": "No bad words", "event_type": 1, "trigger_type": 1, "trigger_metadata": {"keyword_filter": ["free money"]}, "actions": [{"type": 1}]});
+    let (status, body) = w.app.post(&format!("/guilds/{}/auto-moderation/rules", w.guild), &w.owner, rule).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // The owner is exempt from AutoMod, so the source gets through; a member forwarding it must not.
+    let attachment = upload(&w.app, &w.owner, &w.channel, "pic.png", &png(4, 4, 0)).await;
+    let (status, source) = w.say(&w.owner, &w.channel, json!({"content": "get free money", "attachments": [{"id": attachment["id"]}]})).await;
+    assert_eq!(status, StatusCode::OK, "{source}");
+    let files = || std::fs::read_dir(w.app.data_dir.join("attachments")).expect("attachments dir").count();
+    let before = files();
+    let reference = json!({"type": 1, "message_id": source["id"], "channel_id": w.channel});
+    let (status, body) = w.say(&w.member, &w.channel, json!({"message_reference": reference})).await;
+    assert_eq!((status, body["code"].clone()), (StatusCode::BAD_REQUEST, json!(200000)), "{body}");
+    assert_eq!(files(), before, "the blocked forward's file copies are removed");
+}
+
+#[tokio::test]
+async fn automod_spam_counts_repeated_forwards() {
+    let w = world().await;
+    let rule = json!({"name": "Spam", "event_type": 1, "trigger_type": 3, "actions": [{"type": 1}]});
+    let (status, body) = w.app.post(&format!("/guilds/{}/auto-moderation/rules", w.guild), &w.owner, rule).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, source) = w.say(&w.owner, &w.channel, json!({"content": "the same long text"})).await;
+    assert_eq!(status, StatusCode::OK, "{source}");
+    let reference = json!({"type": 1, "message_id": source["id"], "channel_id": w.channel});
+    for _ in 0..2 {
+        let (status, body) = w.say(&w.member, &w.channel, json!({"message_reference": reference})).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+    let (status, body) = w.say(&w.member, &w.channel, json!({"message_reference": reference})).await;
+    assert_eq!((status, body["code"].clone()), (StatusCode::BAD_REQUEST, json!(200000)), "the third forward is spam: {body}");
+}
+
+#[tokio::test]
+async fn a_forward_stopped_by_verification_or_slowmode_copies_no_files() {
+    let w = world().await;
+    let attachment = upload(&w.app, &w.owner, &w.channel, "pic.png", &png(4, 4, 0)).await;
+    let (status, source) = w.say(&w.owner, &w.channel, json!({"content": "look", "attachments": [{"id": attachment["id"]}]})).await;
+    assert_eq!(status, StatusCode::OK, "{source}");
+    // A copy of this source fails (a directory in place of its file, 500): a gate that answers first never reached the copy.
+    let original = w.app.data_dir.join("attachments").join(attachment["id"].as_str().expect("id"));
+    std::fs::remove_file(&original).expect("remove file");
+    std::fs::create_dir(&original).expect("dir in its place");
+    let files = || std::fs::read_dir(w.app.data_dir.join("attachments")).expect("attachments dir").count();
+    let before = files();
+    let reference = json!({"type": 1, "message_id": source["id"], "channel_id": w.channel});
+
+    // Medium: the member's account is not 5 minutes old
+    assert_eq!(w.app.patch(&format!("/guilds/{}", w.guild), &w.owner, json!({"verification_level": 2})).await.0, StatusCode::OK);
+    let (status, body) = w.say(&w.member, &w.channel, json!({"message_reference": reference})).await;
+    assert_eq!((status, body["code"].clone()), (StatusCode::FORBIDDEN, json!(50009)), "{body}");
+    assert_eq!(files(), before, "verification stops the forward before its files are copied");
+    assert_eq!(w.app.patch(&format!("/guilds/{}", w.guild), &w.owner, json!({"verification_level": 0})).await.0, StatusCode::OK);
+
+    assert_eq!(w.app.patch(&format!("/channels/{}", w.channel), &w.owner, json!({"rate_limit_per_user": 60})).await.0, StatusCode::OK);
+    assert_eq!(w.say(&w.member, &w.channel, json!({"content": "first"})).await.0, StatusCode::OK);
+    let (status, body) = w.say(&w.member, &w.channel, json!({"message_reference": reference})).await;
+    assert_eq!((status, body["code"].clone()), (StatusCode::TOO_MANY_REQUESTS, json!(20016)), "{body}");
+    assert_eq!(files(), before, "slowmode stops the forward before its files are copied");
 }
 
 #[tokio::test]

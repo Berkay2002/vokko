@@ -25,6 +25,9 @@ use mail::Mailer;
 pub use me::DUMMY_HASH;
 use tokens::Purpose;
 
+/// At most one verification mail a minute per account through `/auth/verify/resend`.
+const VERIFY_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// Account services held by the app state.
 pub struct Accounts {
     pub mailer: Mailer,
@@ -69,9 +72,10 @@ pub fn link(state: &AppState, page: &str, token: &str) -> String {
     format!("{}/{page}#token={token}", state.config.accounts.web_url)
 }
 
-/// Mails a verification link for `email` (the current address after sign-up, or the new one after a change).
-pub async fn send_verification(state: &AppState, user_id: i64, email: &str) -> ApiResult<()> {
-    let token = tokens::issue(state, user_id, Purpose::Verify, email, tokens::VERIFY_TTL).await?;
+/// Mails a verification link for `email` (the current address after sign-up, or the new one after a change); with a
+/// `cooldown`, 429 instead when the last link went out less than that long ago.
+pub async fn send_verification(state: &AppState, user_id: i64, email: &str, cooldown: Option<std::time::Duration>) -> ApiResult<()> {
+    let token = tokens::issue(state, user_id, Purpose::Verify, email, tokens::VERIFY_TTL, cooldown).await?;
     let body = format!(
         "Confirm this email address for your Vokko account by opening this link within 24 hours:\n\n{}\n\nIf you did not ask for this, ignore this mail.",
         link(state, "verify", &token)
@@ -133,8 +137,8 @@ async fn resend_verification(State(state): State<AppState>, AuthUser(user_id): A
     let (email, verified, pending): (String, bool, Option<String>) =
         sqlx::query_as("SELECT email, email_verified, pending_email FROM users WHERE id = $1").bind(user_id).fetch_one(&state.db).await?;
     match (pending, verified) {
-        (Some(pending), _) => send_verification(&state, user_id, &pending).await?,
-        (None, false) => send_verification(&state, user_id, &email).await?,
+        (Some(pending), _) => send_verification(&state, user_id, &pending, Some(VERIFY_COOLDOWN)).await?,
+        (None, false) => send_verification(&state, user_id, &email, Some(VERIFY_COOLDOWN)).await?,
         (None, true) => return Err(ApiErr::invalid("email", "Your email is already verified.")),
     }
     Ok(StatusCode::NO_CONTENT)

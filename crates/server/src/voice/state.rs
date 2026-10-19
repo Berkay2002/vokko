@@ -68,6 +68,9 @@ pub struct VoiceEntry {
     pub request_to_speak: Option<OffsetDateTime>,
     /// LiveKit reported the participant (webhook or reconciliation).
     pub connected: bool,
+    /// LiveKit sid of the participant that joined with the latest token (`""` until one is seen): a superseded connection with
+    /// the same identity and token (a client that reconnected on its own) leaving does not end the state.
+    pub participant_sid: String,
     pub connected_at: OffsetDateTime,
     /// Rebuilt from LiveKit at this moment and not claimed by an op 4 since.
     pub unbound_since: Option<Instant>,
@@ -362,6 +365,7 @@ pub async fn handle_command(state: &AppState, session: &Arc<Session>, command: V
                 current.token_nonce = nonce.clone();
                 current.issued_at = issued;
                 current.connected = false;
+                current.participant_sid.clear();
                 current.permissions = fresh.permissions;
                 current.suppress = fresh.suppress;
             }
@@ -438,6 +442,7 @@ pub async fn handle_command(state: &AppState, session: &Arc<Session>, command: V
         deaf,
         request_to_speak: None,
         connected: false,
+        participant_sid: String::new(),
         connected_at: OffsetDateTime::now_utc(),
         unbound_since: None,
     };
@@ -547,7 +552,7 @@ async fn moved_away(state: &AppState, previous: &VoiceEntry, new_viewers: Vec<i6
         let only_old: Vec<i64> = old_viewers.into_iter().filter(|viewer| !viewers.contains(viewer)).collect();
         state.hub.send(&only_old, &GatewayEvent::VoiceStateUpdate(Box::new(previous.to_api(true))));
     }
-    release_channel(state, previous.channel_id).await;
+    release_channel(state, previous.channel_id, previous.stage).await;
 }
 
 /// Stored server mute / deafen of a member.
@@ -716,7 +721,7 @@ pub(crate) fn broadcast<'a>(state: &'a AppState, entry: &'a VoiceEntry, left: bo
         }
         state.hub.send(&viewers, &GatewayEvent::VoiceStateUpdate(Box::new(payload)));
         if left {
-            release_channel(state, entry.channel_id).await;
+            release_channel(state, entry.channel_id, entry.stage).await;
         } else {
             // A join or a (un)deafen changes who counts for media skip votes.
             super::control::refresh(state, entry.channel_id);
@@ -726,12 +731,13 @@ pub(crate) fn broadcast<'a>(state: &'a AppState, entry: &'a VoiceEntry, left: bo
 }
 
 /// The last person left `channel_id`: its voice status goes (VOICE_CHANNEL_STATUS_UPDATE with `null`), a DM call ends.
-async fn release_channel(state: &AppState, channel_id: i64) {
+/// `stage`: the channel is a stage, so a live stage instance ends once no moderator is left.
+async fn release_channel(state: &AppState, channel_id: i64, stage: bool) {
     super::stremio::user_left(state, channel_id);
     super::spotify::user_left(state, channel_id);
     super::control::refresh(state, channel_id);
     let inside: Vec<VoiceEntry> = state.voice.all().into_iter().filter(|entry| entry.channel_id == channel_id).collect();
-    if !inside.iter().any(VoiceEntry::moderator) {
+    if stage && !inside.iter().any(VoiceEntry::moderator) {
         // The last stage moderator left: the stage (if one is live) ends. Spawned, so no user lock is held while it demotes others.
         let state = state.clone();
         tokio::spawn(async move { super::stage::end_if_live(&state, channel_id).await });
@@ -823,6 +829,7 @@ async fn restore_backend(state: &AppState, backend: usize) -> Result<(), String>
                 deaf,
                 request_to_speak: None,
                 connected: true,
+                participant_sid: participant.sid.clone(),
                 connected_at: OffsetDateTime::now_utc(),
                 unbound_since: Some(Instant::now()),
             };
@@ -970,7 +977,10 @@ pub(crate) async fn participant_joined(state: &AppState, backend: usize, channel
     let _serial = state.voice.user_lock(user_id).await;
     let marked = state.voice.update_if(user_id, |entry| {
         let matches = entry.channel_id == channel_id && entry.backend == backend && latest_token(entry, participant);
-        entry.connected |= matches;
+        if matches {
+            entry.connected = true;
+            entry.participant_sid.clone_from(&participant.sid);
+        }
         matches
     });
     if marked.is_none() && state.voice.get(user_id).is_none_or(|entry| entry.channel_id != channel_id || entry.backend != backend) {
@@ -986,7 +996,8 @@ pub(crate) async fn participant_left(state: &AppState, backend: usize, channel_i
     let _serial = state.voice.user_lock(user_id).await;
     let removed = state.voice.remove_if(user_id, |entry| {
         let stale = created_at.is_some_and(|at| at < entry.connected_at.unix_timestamp());
-        entry.channel_id == channel_id && entry.backend == backend && latest_token(entry, participant) && !stale
+        let superseded = !entry.participant_sid.is_empty() && !participant.sid.is_empty() && entry.participant_sid != participant.sid;
+        entry.channel_id == channel_id && entry.backend == backend && latest_token(entry, participant) && !stale && !superseded
     });
     if let Some(entry) = removed {
         broadcast(state, &entry, true).await;
@@ -1015,11 +1026,13 @@ pub(crate) async fn track_changed(state: &AppState, backend: usize, channel_id: 
     }
 }
 
-pub(crate) async fn room_finished(state: &AppState, backend: usize, channel_id: i64) {
-    // An empty leftover room timing out on another backend says nothing about the live one.
-    for entry in state.voice.all().into_iter().filter(|entry| entry.channel_id == channel_id && entry.backend == backend && entry.connected) {
+pub(crate) async fn room_finished(state: &AppState, backend: usize, channel_id: i64, created_at: Option<i64>) {
+    // An empty leftover room timing out on another backend says nothing about the live one, and a late event about an
+    // earlier instance of this room (the name is reused) says nothing about the states that connected after it.
+    let stale = |entry: &VoiceEntry| created_at.is_some_and(|at| at < entry.connected_at.unix_timestamp());
+    for entry in state.voice.all().into_iter().filter(|entry| entry.channel_id == channel_id && entry.backend == backend && entry.connected && !stale(entry)) {
         let _serial = state.voice.user_lock(entry.user_id).await;
-        if let Some(gone) = state.voice.remove_if(entry.user_id, |current| current.session_id == entry.session_id) {
+        if let Some(gone) = state.voice.remove_if(entry.user_id, |current| current.session_id == entry.session_id && !stale(current)) {
             broadcast(state, &gone, true).await;
         }
     }
@@ -1102,7 +1115,7 @@ async fn recompute_user(state: &AppState, guild_id: i64, user_id: i64) {
             }
         }
         Some(permissions) => {
-            modify(state, user_id, |current| {
+            let after = modify(state, user_id, |current| {
                 current.permissions = permissions;
                 if !current.stage {
                     current.suppress = permissions & SPEAK == 0;
@@ -1110,6 +1123,13 @@ async fn recompute_user(state: &AppState, guild_id: i64, user_id: i64) {
                 true
             })
             .await;
+            if after.is_some_and(|after| after.stage && entry.moderator() && !after.moderator()) {
+                // A stage moderator lost the moderator permissions in place: as if they had left. Spawned, as release_channel
+                // does: the admission lock is held here, and ending the stage demotes others.
+                let state = state.clone();
+                let channel_id = entry.channel_id;
+                tokio::spawn(async move { super::stage::end_if_live(&state, channel_id).await });
+            }
         }
     }
 }
@@ -1152,6 +1172,7 @@ pub async fn move_member(state: &AppState, guild_id: i64, user_id: i64, channel_
     entry.token_nonce = nonce.clone();
     entry.issued_at = issued;
     entry.connected = false;
+    entry.participant_sid.clear();
     entry.permissions = permissions;
     entry.stage = stage;
     entry.suppress = stage || permissions & SPEAK == 0;

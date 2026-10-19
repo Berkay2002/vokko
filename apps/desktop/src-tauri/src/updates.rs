@@ -17,10 +17,12 @@ pub const CONFIG_KEY: &str = "updater";
 /// Progress events are throttled to one per this many downloaded bytes.
 const PROGRESS_STEP: u64 = 256 * 1024;
 
+/// `PackageManager` is a Linux .deb install: the manifest only carries the AppImage, so the package manager updates it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "camelCase")]
 pub enum UpdateStatus {
     Disabled,
+    PackageManager,
     Idle,
     Checking,
     UpToDate,
@@ -40,9 +42,18 @@ pub struct UpdateState {
     pending: Mutex<Option<Pending>>,
 }
 
+/// Starting status: a build without updater config is disabled; on Linux only an AppImage (`$APPIMAGE` set) updates itself.
+pub fn initial_status(configured: bool, linux_package: bool) -> UpdateStatus {
+    match (configured, linux_package) {
+        (false, _) => UpdateStatus::Disabled,
+        (true, true) => UpdateStatus::PackageManager,
+        (true, false) => UpdateStatus::Idle,
+    }
+}
+
 impl UpdateState {
-    pub fn new(configured: bool) -> Self {
-        Self { status: Mutex::new(if configured { UpdateStatus::Idle } else { UpdateStatus::Disabled }), pending: Mutex::new(None) }
+    pub fn new(status: UpdateStatus) -> Self {
+        Self { status: Mutex::new(status), pending: Mutex::new(None) }
     }
 
     fn status(&self) -> UpdateStatus {
@@ -73,7 +84,9 @@ pub fn desktop_update_status(state: State<'_, UpdateState>) -> UpdateStatus {
 #[tauri::command]
 pub async fn desktop_update_check(app: AppHandle, state: State<'_, UpdateState>, download: Option<bool>) -> Result<UpdateStatus, String> {
     match state.status() {
-        UpdateStatus::Disabled | UpdateStatus::Checking | UpdateStatus::Downloading { .. } | UpdateStatus::Ready { .. } => return Ok(state.status()),
+        UpdateStatus::Disabled | UpdateStatus::PackageManager | UpdateStatus::Checking | UpdateStatus::Downloading { .. } | UpdateStatus::Ready { .. } => {
+            return Ok(state.status());
+        }
         _ => {}
     }
     set_status(&app, UpdateStatus::Checking);
@@ -162,4 +175,17 @@ pub fn desktop_update_install(app: AppHandle, state: State<'_, UpdateState>) -> 
     }
     #[cfg(not(windows))]
     app.restart()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deb_installs_leave_updates_to_the_package_manager() {
+        assert_eq!(initial_status(false, true), UpdateStatus::Disabled);
+        assert_eq!(initial_status(true, true), UpdateStatus::PackageManager);
+        assert_eq!(initial_status(true, false), UpdateStatus::Idle);
+        assert_eq!(serde_json::to_value(UpdateStatus::PackageManager).unwrap(), serde_json::json!({ "state": "packageManager" }));
+    }
 }

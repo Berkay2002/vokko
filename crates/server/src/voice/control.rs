@@ -192,6 +192,7 @@ mod tests {
             deaf,
             request_to_speak: None,
             connected: true,
+            participant_sid: String::new(),
             connected_at: time::OffsetDateTime::UNIX_EPOCH,
             unbound_since: None,
         }

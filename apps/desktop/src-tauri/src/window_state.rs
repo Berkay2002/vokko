@@ -92,7 +92,7 @@ impl WindowStateStore {
             .parent()
             .map_or(Ok(()), std::fs::create_dir_all)
             .and_then(|()| serde_json::to_vec_pretty(&saved).map_err(Into::into))
-            .and_then(|json| std::fs::write(path, json));
+            .and_then(|json| vokko_platform::write_atomic(path, &json));
         if let Err(error) = result {
             log::warn!("cannot save the window state: {error}");
         }
