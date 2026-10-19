@@ -109,6 +109,26 @@ describe("hierarchy", () => {
     expect(canEditRole(guild, helper, guild.roles[1]!)).toBe(false);
     expect(canEditRole(guild, owner, guild.roles[3]!)).toBe(true);
   });
+
+  it("a timeout takes the moderation permissions from everyone but the owner and administrators", () => {
+    const until = new Date(Date.now() + 3_600_000).toISOString();
+    expect(canModerate(guild, user("m", ["mod"], until), helper, "kick")).toBe(false);
+    expect(canEditRole(guild, user("m", ["mod"], until), guild.roles[1]!)).toBe(false);
+    expect(canModerate(guild, user("a", ["admin"], until), mod, "kick")).toBe(true);
+    expect(canModerate(guild, user("owner", [], until), mod, "ban")).toBe(true);
+  });
+
+  it("at equal position the older (smaller) role id ranks higher, as the server's compare_roles", () => {
+    const tied = { ...guild, roles: [...guild.roles, role("200", 2, Perm.KICK_MEMBERS | Perm.MANAGE_ROLES), role("300", 2, Perm.KICK_MEMBERS | Perm.MANAGE_ROLES)] };
+    const older = user("o", ["200"]);
+    const newer = user("n", ["300"]);
+    expect(outranks(tied, older, newer)).toBe(true);
+    expect(outranks(tied, newer, older)).toBe(false);
+    expect(canModerate(tied, older, newer, "kick")).toBe(true);
+    expect(canEditRole(tied, older, tied.roles[5]!)).toBe(true);
+    expect(canEditRole(tied, newer, tied.roles[4]!)).toBe(false);
+    expect(canEditRole(tied, older, tied.roles[4]!)).toBe(false);
+  });
 });
 
 describe("threadPermissions", () => {
