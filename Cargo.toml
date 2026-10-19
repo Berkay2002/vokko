@@ -22,7 +22,7 @@ axum = { version = "0.8", default-features = false, features = ["http1", "json",
 tower-http = { version = "0.6", default-features = false, features = ["cors"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "migrate", "macros", "time", "tls-rustls-ring-webpki"] }
 argon2 = "0.5"
-rand = "0.9"
+rand = "0.10"
 sha2 = "0.10"
 hmac = "0.12"
 base64 = "0.22"
