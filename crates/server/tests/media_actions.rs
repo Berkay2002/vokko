@@ -188,6 +188,21 @@ async fn sticker_count_is_limited_per_guild() {
 }
 
 #[tokio::test]
+async fn concurrent_sticker_creates_cannot_pass_the_cap() {
+    let w = world_with(|config| config.max_stickers_per_guild = 1).await;
+    let mut attachments = Vec::new();
+    for extra in 0..4 {
+        attachments.push(upload(&w.app, &w.owner, &w.channel, "s.png", &png(8, 8, extra)).await["id"].clone());
+    }
+    let path = format!("/guilds/{}/stickers", w.guild);
+    let results = futures_util::future::join_all(
+        attachments.iter().map(|id| w.app.post(&path, &w.owner, json!({"name": "race", "tags": "wave,hello", "attachment_id": id}))),
+    )
+    .await;
+    assert_eq!(results.iter().filter(|(status, _)| *status == StatusCode::OK).count(), 1, "exactly the cap got in");
+}
+
+#[tokio::test]
 async fn sending_stickers_follows_membership_and_external_sticker_permission() {
     let w = world().await;
     let (_, sticker) = w.sticker(&w.owner, &w.guild, "wave", &png(64, 64, 0)).await;
