@@ -122,20 +122,20 @@ fn privacy() -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!("the privacy denylist has {} pattern(s) that cannot be compiled (line(s) {})", bad.len(), lines.join(", ")).into());
     }
     // No `-I`: binary files (images, fonts, PDFs) are searched too, and a hit prints only `Binary file <path> matches`, never the
-    // matched bytes. Metadata stored as UTF-16 or compressed (PNG zTXt, PDF streams) still cannot match.
+    // matched bytes. Metadata stored as UTF-16 or compressed (PNG zTXt, PDF streams) still cannot match, and compressed bytes can
+    // match a short case-insensitive pattern by chance (a false positive to check locally).
     let mut hits = grep(root, &patterns, &["--", ".", ":(exclude,glob)**/Cargo.lock", ":(exclude,glob)**/package-lock.json"])?;
     // File names are checked as well: the tracked paths go to a git-ignored file that is searched by line number.
     let list = Command::new("git").current_dir(root).args(["-c", "core.quotePath=false", "ls-files"]).output()?;
     if !list.status.success() {
         return Err("git ls-files failed".into());
     }
-    let paths = String::from_utf8_lossy(&list.stdout).into_owned();
     std::fs::create_dir_all(root.join("target"))?;
-    std::fs::write(root.join(PATH_LIST), &paths)?;
+    std::fs::write(root.join(PATH_LIST), &list.stdout)?;
     let path_hits = grep(root, &patterns, &["--no-index", "--", PATH_LIST]);
     let _ = std::fs::remove_file(root.join(PATH_LIST));
-    let names: Vec<&str> = paths.lines().collect();
-    hits.extend(line_numbers(&path_hits?).into_iter().filter_map(|n| names.get(n - 1)).map(|path| format!("{path} (file name)")));
+    // Reported by position, not by path: the path itself holds the matched text, and CI logs must never echo it.
+    hits.extend(line_numbers(&path_hits?).into_iter().map(|n| format!("tracked path #{n} (file name; `git ls-files | sed -n {n}p` shows it)")));
     if hits.is_empty() {
         println!("Privacy guard passed: {} pattern(s), no matches in tracked files or file names.", patterns.len());
         Ok(())
