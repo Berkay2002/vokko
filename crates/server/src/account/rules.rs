@@ -28,9 +28,7 @@ pub fn username(raw: &str) -> ApiResult<String> {
 
 pub fn email(raw: &str) -> ApiResult<String> {
     let email = raw.trim().to_lowercase();
-    let well_formed = email.len() <= 254
-        && !email.chars().any(char::is_whitespace)
-        && email.split_once('@').is_some_and(|(local, domain)| !local.is_empty() && !domain.is_empty() && !domain.contains('@'));
+    let well_formed = email.len() <= 254 && !email.chars().any(char::is_whitespace) && email.parse::<lettre::Address>().is_ok();
     if well_formed { Ok(email) } else { Err(ApiErr::invalid("email", "Not a well formed email address.")) }
 }
 
@@ -150,6 +148,17 @@ mod tests {
         assert!(username_problem("Upper").is_some());
         assert!(username_problem("with space").is_some());
         assert_eq!(username("  SaM ").ok(), Some("sam".to_owned()));
+    }
+
+    #[test]
+    fn emails() {
+        assert_eq!(email(" Mixed@Example.TEST ").ok(), Some("mixed@example.test".to_owned()));
+        assert!(email("a.b+c@example.com").is_ok());
+        assert!(email("x<victim@example.com>").is_err());
+        assert!(email("(c)a@b.com").is_err());
+        assert!(email("a@b.com>").is_err());
+        assert!(email("\"a b\"@x.io").is_err());
+        assert!(email("a@b@c.io").is_err());
     }
 
     #[test]
