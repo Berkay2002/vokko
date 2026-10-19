@@ -23,7 +23,7 @@ use crate::app_icons;
 use crate::auth::{hash_token, random_hex, user_for_token};
 use crate::error::{ApiErr, ApiResult};
 use crate::events;
-use crate::hub::{Link, LinkReceiver, ResumeOutcome, Session};
+use crate::hub::{Link, LinkReceiver, MAX_BOT_SESSIONS, MAX_USER_SESSIONS, ResumeOutcome, Session};
 use crate::net::client_ip;
 use crate::presence;
 use crate::routes::relationships::{open_dms, relationships_of};
@@ -205,8 +205,10 @@ async fn handshake(state: &AppState, writer: &mut Writer, stream: &mut Stream, l
                         return None;
                     }
                 };
+                // `user_for_token` accepted the token, so a `Bot ` prefix means a bot account.
+                let max_sessions = if identify.token.starts_with("Bot ") { MAX_BOT_SESSIONS } else { MAX_USER_SESSIONS };
                 let (session, generation) =
-                    state.hub.open_session(user_id, session_id, hash_token(&identify.token), link, GatewayEvent::Ready(Box::new(ready)).data());
+                    state.hub.open_session(user_id, session_id, hash_token(&identify.token), link, GatewayEvent::Ready(Box::new(ready)).data(), max_sessions);
                 // A revoke during build_ready deleted the token before this session was registered, so close_token_sessions
                 // missed it. Revokers delete the row before purging, so checking after registration closes the window.
                 if !matches!(user_for_token(state, &identify.token).await, Ok(Some(id)) if id == user_id) {
