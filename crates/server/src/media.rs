@@ -273,6 +273,8 @@ pub fn plain_content_type(declared: Option<&str>, filename: &str) -> String {
             || value.contains("svg")
             || value.starts_with("image/")
             || value.contains("ecmascript")
+            || value.contains("jscript")
+            || value.contains("livescript")
     };
     if let Some(declared) = declared.filter(|value| !risky(value) && value != "application/octet-stream") {
         return declared;
@@ -367,6 +369,8 @@ mod tests {
         assert_eq!(sniff_image(b"plain text"), None);
         assert_eq!(plain_content_type(Some("text/html"), "x.html"), "application/octet-stream");
         assert_eq!(plain_content_type(Some("image/png"), "x.png"), "application/octet-stream");
+        assert_eq!(plain_content_type(Some("text/jscript"), "x.js"), "application/octet-stream");
+        assert_eq!(plain_content_type(Some("text/livescript"), "x.js"), "application/octet-stream");
         assert_eq!(plain_content_type(Some("application/pdf"), "a.pdf"), "application/pdf");
         assert_eq!(plain_content_type(None, "notes.txt"), "text/plain");
     }
