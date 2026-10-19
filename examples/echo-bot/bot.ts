@@ -5,6 +5,9 @@
 //
 // With VOKKO_GUILD_ID the commands are registered for that server only; otherwise globally.
 
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 export interface InteractionOption {
   name: string;
   type: number;
@@ -106,7 +109,7 @@ function connect(base: string, token: string, attempt = 0): void {
   });
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const token = process.env.VOKKO_BOT_TOKEN;
   if (!token) {
     console.error("set VOKKO_BOT_TOKEN (Settings > Developer > New Application shows it once)");
