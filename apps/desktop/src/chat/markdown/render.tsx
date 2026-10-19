@@ -259,16 +259,17 @@ function renderInline(nodes: Inline[], ctx: MarkdownContext, keyPrefix: string):
             target="_blank"
             rel="noopener noreferrer"
             onClick={(e) => {
-              if (onLink) {
-                e.preventDefault();
-                onLink(href);
-                return;
-              }
-              // A pasted message link opens in the app, not in the system browser (the desktop webview hands _blank links to it).
+              // A pasted message link opens in the app, not in the system browser (the desktop webview hands _blank links to it),
+              // and never behind the Leaving Vokko warning of onLink.
               const path = e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey ? messagePathOf(href) : null;
               if (path) {
                 e.preventDefault();
                 go(path);
+                return;
+              }
+              if (onLink) {
+                e.preventDefault();
+                onLink(href);
               }
             }}
           >
