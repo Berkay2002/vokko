@@ -33,7 +33,7 @@ Keep each file's existing line endings. Changes to the wire contract update `doc
 
 No real names, handles, email addresses, personal domains, hostnames, IP addresses, home-directory paths, tokens, keys or `.env` files. Use placeholders: `example.com`, `vokko.example.com`, `192.0.2.10`, `sam`, `carol`. Deployment-specific values belong in git-ignored files (`deploy/.env`, `.private/`) or environment variables.
 
-`cargo xtask privacy` checks tracked files against a pattern list. Maintainers keep that list in `.private/denylist.txt` (git-ignored) or the `VOKKO_PRIVACY_DENYLIST` environment variable (a CI secret); without either the check skips itself. Never write those patterns into a tracked file.
+`cargo xtask privacy` checks tracked files (binary ones too, reported by path only) and their file names against a pattern list. Maintainers keep that list in `.private/denylist.txt` (git-ignored) or the `VOKKO_PRIVACY_DENYLIST` environment variable (a CI secret); without either the check skips itself. Never write those patterns into a tracked file.
 
 ## Security
 
