@@ -11,7 +11,8 @@
 #   VOKKO_BACKUP_DATABASE_URL  set to skip docker: dump this database with the local pg_dump instead ...
 #   VOKKO_BACKUP_DATA_DIR      ... and tar this directory instead of the volume
 #   VOKKO_BACKUP_DAILY=7 VOKKO_BACKUP_WEEKLY=4   how many of each to keep
-#   VOKKO_BACKUP_OFFSITE       optional rsync destination (host:path or a mounted path), synced after every run
+#   VOKKO_BACKUP_OFFSITE       optional rsync destination (host:path or a mounted path), mirrored after every run
+#                              (refused when local has under half the offsite sets: a missing or wiped backup disk)
 set -euo pipefail
 
 : "${VOKKO_BACKUP_DIR:?set VOKKO_BACKUP_DIR to the backup destination}"
@@ -77,7 +78,21 @@ prune "$VOKKO_BACKUP_DIR/daily" "$DAILY"
 prune "$VOKKO_BACKUP_DIR/weekly" "$WEEKLY"
 
 if [ -n "${VOKKO_BACKUP_OFFSITE:-}" ]; then
-    # -H keeps the daily/weekly hard links as one copy; --delete mirrors the rotation.
+    # --delete mirrors the rotation, but would also mirror a loss: an unmounted or wiped backup dir leaves only this
+    # run's set locally, and the sync would delete every older set offsite. Refuse when local has under half of offsite.
+    sets() { find "$VOKKO_BACKUP_DIR/daily" "$VOKKO_BACKUP_DIR/weekly" -mindepth 1 -maxdepth 1 -type d -name '2*' | wc -l; }
+    offsite_sets() {
+        for d in daily weekly; do rsync --list-only "$VOKKO_BACKUP_OFFSITE/$d/" 2>/dev/null || true; done |
+            awk '$1 ~ /^d/ && $NF ~ /^2/' | wc -l
+    }
+    here=$(sets)
+    there=$(offsite_sets)
+    if [ $((here * 2)) -lt "$there" ]; then
+        echo "backup: NOT syncing to $VOKKO_BACKUP_OFFSITE: $here local sets but $there offsite (is $VOKKO_BACKUP_DIR the right, mounted disk?)." >&2
+        echo "backup: if the loss is intended, sync by hand: rsync -aH --delete $VOKKO_BACKUP_DIR/ $VOKKO_BACKUP_OFFSITE/" >&2
+        exit 1
+    fi
+    # -H keeps the daily/weekly hard links as one copy.
     rsync -aH --delete "$VOKKO_BACKUP_DIR/" "$VOKKO_BACKUP_OFFSITE/"
     echo "backup: synced to $VOKKO_BACKUP_OFFSITE"
 fi

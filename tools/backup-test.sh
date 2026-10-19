@@ -36,6 +36,17 @@ for _ in 1 2 3; do "$here/backup.sh" && sleep 1; done
 [ "$(ls "$work/backups/daily" | wc -l)" -eq 2 ] || { echo "FAIL: rotation kept $(ls "$work/backups/daily")" >&2; exit 1; }
 [ "$(ls "$work/backups/weekly" | wc -l)" -eq 1 ] || { echo "FAIL: weekly has $(ls "$work/backups/weekly")" >&2; exit 1; }
 
+# Offsite: a normal run mirrors; a run on an emptied backup dir must refuse and leave the offsite history alone.
+mkdir "$work/offsite"
+VOKKO_BACKUP_OFFSITE=$work/offsite "$here/backup.sh"
+[ "$(ls "$work/offsite/daily" | wc -l)" -eq 2 ] || { echo "FAIL: offsite has $(ls "$work/offsite/daily")" >&2; exit 1; }
+mkdir "$work/offsite/daily/20000101-000001" "$work/offsite/daily/20000101-000002" "$work/offsite/daily/20000101-000003"
+mv "$work/backups" "$work/backups.kept"
+if VOKKO_BACKUP_OFFSITE=$work/offsite "$here/backup.sh"; then echo "FAIL: synced an emptied backup dir offsite" >&2; exit 1; fi
+[ "$(ls "$work/offsite/daily" | wc -l)" -eq 5 ] || { echo "FAIL: offsite lost sets: $(ls "$work/offsite/daily")" >&2; exit 1; }
+rm -rf "$work/backups"
+mv "$work/backups.kept" "$work/backups"
+
 sum=$(cksum <"$work/data/attachments/1/a.bin")
 psql "$url" -q -c "drop table backup_probe; truncate users cascade"
 rm -rf "$work/data"/*

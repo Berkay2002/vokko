@@ -21,7 +21,11 @@ up with the bucket's own versioning). `incoming/` only holds half-finished uploa
    and leaves nothing behind (each run writes to `.tmp-*` and is renamed only when verified).
 4. Writes `$VOKKO_BACKUP_DIR/daily/<YYYYMMDD-HHMMSS>/{db.dump,data.tar.gz}`. When no weekly is younger than 7 days the run is
    also hard-linked into `weekly/`. Keeps the newest `VOKKO_BACKUP_DAILY` (7) and `VOKKO_BACKUP_WEEKLY` (4).
-5. With `VOKKO_BACKUP_OFFSITE` set, `rsync -aH --delete` mirrors the whole backup dir there.
+5. With `VOKKO_BACKUP_OFFSITE` set, `rsync -aH --delete` mirrors the whole backup dir there, so the offsite copy follows
+   the rotation. Because a mirror also copies a loss, the sync is refused (exit 1, nothing deleted offsite) when the local
+   `daily/` plus `weekly/` hold fewer than half as many sets as the offsite copy, which is what an unmounted or wiped
+   backup disk looks like (the run then holds only its own new set). Fix the disk, or if the loss is intended (say you
+   lowered `VOKKO_BACKUP_DAILY` a lot), run the printed `rsync` command once by hand.
 
 Environment: `VOKKO_BACKUP_DIR` (required), `VOKKO_BACKUP_COMPOSE_DIR` (default `deploy/` next to the script),
 `VOKKO_BACKUP_DATA_VOLUME` (default `vokko_vokko-data`, the compose project name plus `_vokko-data`), `VOKKO_BACKUP_DAILY`,
