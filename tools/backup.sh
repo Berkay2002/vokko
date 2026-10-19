@@ -9,6 +9,8 @@
 #   VOKKO_BACKUP_COMPOSE_DIR   the deploy/ dir of the compose stack (default: deploy/ next to this script)
 #   VOKKO_BACKUP_DATA_VOLUME   the server's data volume (default: vokko_vokko-data)
 #   VOKKO_BACKUP_DATABASE_URL  set to skip docker: dump this database with the local pg_dump instead ...
+#                              (keep the password out of it, other local users can read process arguments: put it
+#                              in ~/.pgpass (mode 0600), PGPASSFILE or PGPASSWORD instead)
 #   VOKKO_BACKUP_DATA_DIR      ... and tar this directory instead of the volume
 #   VOKKO_BACKUP_DAILY=7 VOKKO_BACKUP_WEEKLY=4   how many of each to keep
 #   VOKKO_BACKUP_OFFSITE       optional rsync destination (host:path or a mounted path), mirrored after every run

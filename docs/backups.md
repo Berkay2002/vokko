@@ -33,6 +33,11 @@ Environment: `VOKKO_BACKUP_DIR` (required), `VOKKO_BACKUP_COMPOSE_DIR` (default 
 and the local `pg_dump`/`pg_restore` (same major version as the server or newer) are used instead; that is the mode
 `backup-test.sh` runs in.
 
+Keep the password out of `VOKKO_BACKUP_DATABASE_URL` (`postgres://vokko@db.example/vokko`, not
+`postgres://vokko:secret@...`): the URL is passed to `pg_dump`, `pg_restore`, `dropdb` and `createdb` as an argument, and
+on a shared host other users can read process arguments. Put the password in `~/.pgpass` (mode `0600`) or the file named
+by `PGPASSFILE`; `PGPASSWORD` in the job's environment also works. libpq reads all three, so both scripts need nothing else.
+
 ## Nightly on macOS (launchd)
 
 Example for a macOS host running the stack from a checkout of this repo (`<repo checkout>`) with the backup directory on a different disk than
