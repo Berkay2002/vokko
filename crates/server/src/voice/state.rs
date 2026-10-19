@@ -1025,11 +1025,13 @@ pub(crate) async fn track_changed(state: &AppState, backend: usize, channel_id: 
     }
 }
 
-pub(crate) async fn room_finished(state: &AppState, backend: usize, channel_id: i64) {
-    // An empty leftover room timing out on another backend says nothing about the live one.
-    for entry in state.voice.all().into_iter().filter(|entry| entry.channel_id == channel_id && entry.backend == backend && entry.connected) {
+pub(crate) async fn room_finished(state: &AppState, backend: usize, channel_id: i64, created_at: Option<i64>) {
+    // An empty leftover room timing out on another backend says nothing about the live one, and a late event about an
+    // earlier instance of this room (the name is reused) says nothing about the states that connected after it.
+    let stale = |entry: &VoiceEntry| created_at.is_some_and(|at| at < entry.connected_at.unix_timestamp());
+    for entry in state.voice.all().into_iter().filter(|entry| entry.channel_id == channel_id && entry.backend == backend && entry.connected && !stale(entry)) {
         let _serial = state.voice.user_lock(entry.user_id).await;
-        if let Some(gone) = state.voice.remove_if(entry.user_id, |current| current.session_id == entry.session_id) {
+        if let Some(gone) = state.voice.remove_if(entry.user_id, |current| current.session_id == entry.session_id && !stale(current)) {
             broadcast(state, &gone, true).await;
         }
     }

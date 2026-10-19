@@ -1350,6 +1350,27 @@ async fn webhooks_belong_to_the_backend_that_signed_them() {
 }
 
 #[tokio::test]
+async fn a_late_room_finished_spares_states_that_connected_after_it() {
+    let w = world().await;
+    let alice_id: i64 = w.alice_id.parse().expect("id");
+    let (mut alice, _) = Client::identify(&w.address, &w.alice).await;
+    alice.voice(Some(&w.voice), false).await;
+    alice.voice_answer().await;
+    let session = alice.wait_for("VOICE_STATE_UPDATE").await["session_id"].as_str().expect("session").to_owned();
+    let joined = json!({"event": "participant_joined", "room": {"name": w.room()}, "participant": w.participant(&w.alice_id, &session, &w.nonce(&w.alice_id))});
+    assert_eq!(w.webhook(joined, SECRET).await, StatusCode::OK);
+    let connected_at = w.app.state.voice.get(alice_id).filter(|entry| entry.connected).expect("connected").connected_at.unix_timestamp();
+    let finished = |at: i64| json!({"event": "room_finished", "room": {"name": w.room()}, "createdAt": at.to_string()});
+
+    // The previous instance of the room finished before alice connected to this one: her state stays.
+    assert_eq!(w.webhook(finished(connected_at - 10), SECRET).await, StatusCode::OK);
+    assert!(w.app.state.voice.get(alice_id).is_some());
+    // This instance finishing ends it.
+    assert_eq!(w.webhook(finished(connected_at + 1), SECRET).await, StatusCode::OK);
+    assert!(w.app.state.voice.get(alice_id).is_none());
+}
+
+#[tokio::test]
 async fn a_restart_rebuilds_the_rooms_backends_from_every_backend() {
     let (w, second) = two_backends().await;
     // Carl was in this channel's room on the second backend when the server stopped.
