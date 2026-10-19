@@ -788,8 +788,9 @@ async fn create_message(
         }
     };
     // Last: the file copies. The guard removes them if this request is dropped before the insert stored them.
+    let mut copies = forward::CopyGuard::new(&state, access.channel.id);
     let forward = match forward {
-        Some(source) => match source.copy(&state).await {
+        Some(source) => match source.copy(&state, &mut copies).await {
             Ok(forward) => Some(forward),
             Err(error) => {
                 release().await;
@@ -798,7 +799,6 @@ async fn create_message(
         },
         None => None,
     };
-    let copies = forward::CopyGuard::new(&state, forward.as_ref().map(ForwardDraft::copy_ids).unwrap_or_default());
     let draft = Draft { content, kind, reference, attachments, nonce: body.nonce, mentions, ping_replied, stickers, forward };
     let mut committed = false;
     let inserted = insert_message_tracked(&state, &access.channel, user_id, draft, extras, &mut committed).await;

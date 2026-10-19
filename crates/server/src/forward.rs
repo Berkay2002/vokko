@@ -50,12 +50,19 @@ pub struct ForwardSource {
 /// attachment row already references belong to a committed message and stay. [`CopyGuard::disarm`] once the insert returned.
 pub struct CopyGuard {
     state: AppState,
+    /// The target channel: the insert holds its row lock until the transaction ends.
+    channel: i64,
     ids: Vec<i64>,
 }
 
 impl CopyGuard {
-    pub fn new(state: &AppState, ids: Vec<i64>) -> Self {
-        Self { state: state.clone(), ids }
+    pub fn new(state: &AppState, channel: i64) -> Self {
+        Self { state: state.clone(), channel, ids: Vec::new() }
+    }
+
+    /// A copy about to be written: removed with the others if the request is dropped.
+    pub fn track(&mut self, id: i64) {
+        self.ids.push(id);
     }
 
     pub fn disarm(mut self) {
@@ -69,9 +76,17 @@ impl Drop for CopyGuard {
         if self.ids.is_empty() {
             return;
         }
-        let (state, ids) = (self.state.clone(), std::mem::take(&mut self.ids));
+        let (state, channel, ids) = (self.state.clone(), self.channel, std::mem::take(&mut self.ids));
         runtime.spawn(async move {
-            let stored: Vec<(i64,)> = match sqlx::query_as("SELECT id FROM attachments WHERE id = ANY($1)").bind(&ids).fetch_all(&state.db).await {
+            // A send dropped at its COMMIT may still commit: wait for its transaction (it holds the channel row from its
+            // last_message_id update) before asking which copies a row references, or a committed forward loses its files.
+            let stored: Result<Vec<(i64,)>, sqlx::Error> = async {
+                let mut tx = state.db.begin().await?;
+                sqlx::query("SELECT id FROM channels WHERE id = $1 FOR SHARE").bind(channel).execute(&mut *tx).await?;
+                sqlx::query_as("SELECT id FROM attachments WHERE id = ANY($1)").bind(&ids).fetch_all(&mut *tx).await
+            }
+            .await;
+            let stored = match stored {
                 Ok(stored) => stored,
                 Err(error) => return tracing::warn!(%error, "cannot check a dropped forward's file copies"),
             };
@@ -163,8 +178,9 @@ pub async fn prepare(
 }
 
 impl ForwardSource {
-    /// Builds the snapshot, copying the attachment files; a failure while copying removes what was copied so far.
-    pub async fn copy(self, state: &AppState) -> ApiResult<ForwardDraft> {
+    /// Builds the snapshot, copying the attachment files into `guard` (so a request dropped mid-copy leaves none behind); a
+    /// failure while copying removes what was copied so far.
+    pub async fn copy(self, state: &AppState, guard: &mut CopyGuard) -> ApiResult<ForwardDraft> {
         let Self { source_channel, source_guild, source_message, mut content, stickers } = self;
         let originals = std::mem::take(&mut content.attachments);
         let mut copies: Vec<AttachmentCopy> = Vec::new();
@@ -172,15 +188,14 @@ impl ForwardSource {
         // Files are write-once, so the local backend may share them with a hard link.
         for original in originals {
             let new_id = state.ids.next();
+            guard.track(new_id);
             match state.storage.copy(original.id.db(), new_id).await {
                 Ok(()) => {}
                 // The file is gone: drop it from the copy rather than point at a dead link.
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(error) => {
                     // A failed copy can leave a partial target behind (a local copy that ran out of space).
-                    let mut written: Vec<i64> = copies.iter().map(|copy| copy.id).collect();
-                    written.push(new_id);
-                    media::remove_files(state, &written).await;
+                    media::remove_files(state, &std::mem::take(&mut guard.ids)).await;
                     return Err(error.into());
                 }
             }

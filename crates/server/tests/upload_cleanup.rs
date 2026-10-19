@@ -26,6 +26,10 @@ struct ControlledStorage {
     entered: Semaphore,
     /// Held calls wait for a permit here.
     release: Semaphore,
+    /// `copy` writes its target and then waits for `release` (a forward held mid-copy).
+    hold_copy: AtomicBool,
+    /// One permit per held `copy` call.
+    copying: Semaphore,
 }
 
 impl Default for ControlledStorage {
@@ -36,6 +40,8 @@ impl Default for ControlledStorage {
             hold: AtomicBool::new(false),
             entered: Semaphore::new(0),
             release: Semaphore::new(0),
+            hold_copy: AtomicBool::new(false),
+            copying: Semaphore::new(0),
         }
     }
 }
@@ -75,7 +81,14 @@ impl Storage for ControlledStorage {
     }
 
     fn copy(&self, from: i64, to: i64) -> BoxFuture<'_, io::Result<()>> {
-        self.files.copy(from, to)
+        Box::pin(async move {
+            self.files.copy(from, to).await?;
+            if self.hold_copy.load(Ordering::SeqCst) {
+                self.copying.add_permits(1);
+                self.release.acquire().await.expect("semaphore open").forget();
+            }
+            Ok(())
+        })
     }
 
     fn delete(&self, id: i64) -> BoxFuture<'_, io::Result<()>> {
@@ -281,4 +294,56 @@ async fn a_client_that_disconnects_mid_body_leaves_nothing_behind() {
     assert!(eventually(|| async { staged_files(&setup.app) == 0 }).await, "the partial staged file is removed");
     assert_eq!(uploads_in_db(&setup).await, 0);
     assert!(setup.storage.files.is_empty());
+}
+
+#[tokio::test]
+async fn a_forward_dropped_mid_copy_leaves_no_copies() {
+    let setup = setup().await;
+    assert_eq!(upload(&setup.app, &setup.token, &setup.channel, 80).await, StatusCode::OK);
+    let (id,): (i64,) =
+        sqlx::query_as("SELECT id FROM attachments WHERE uploader_id = $1").bind(setup.user_id).fetch_one(&setup.app.state.db).await.expect("upload");
+    let path = format!("/channels/{}/messages", setup.channel);
+    let (status, source) = setup.app.post(&path, &setup.token, serde_json::json!({"content": "look", "attachments": [{"id": id.to_string()}]})).await;
+    assert_eq!(status, StatusCode::OK, "{source}");
+    assert_eq!(setup.storage.files.len(), 1);
+
+    setup.storage.hold_copy.store(true, Ordering::SeqCst);
+    let body = serde_json::json!({"message_reference": {"type": 1, "message_id": source["id"], "channel_id": setup.channel}});
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v1{path}"))
+        .header("authorization", &setup.token)
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .expect("request");
+    let router = setup.app.router.clone();
+    let forward = tokio::spawn(async move { router.oneshot(request).await.expect("response").status() });
+    tokio::time::timeout(Duration::from_secs(10), setup.storage.copying.acquire()).await.expect("the forward reached its copy").expect("open").forget();
+    assert_eq!(setup.storage.files.len(), 2, "the copy is written");
+    forward.abort();
+    assert!(forward.await.expect_err("aborted").is_cancelled());
+    assert!(eventually(|| async { setup.storage.files.len() == 1 }).await, "the dropped forward's copy is removed");
+}
+
+#[tokio::test]
+async fn a_dropped_forward_keeps_the_copies_of_a_commit_in_flight() {
+    let setup = setup().await;
+    let channel: i64 = setup.channel.parse().expect("channel id");
+    setup.storage.put(77, Bytes::from_static(b"copy")).await.expect("put");
+    // A send dropped at its COMMIT: the transaction holds the channel row and has stored the copy's row, not yet committed.
+    let mut tx = setup.app.state.db.begin().await.expect("begin");
+    sqlx::query("UPDATE channels SET last_activity_at = now() WHERE id = $1").bind(channel).execute(&mut *tx).await.expect("channel row");
+    sqlx::query("INSERT INTO attachments (id, channel_id, uploader_id, filename, size, key) VALUES (77, $1, $2, 'copy.png', 4, 'k')")
+        .bind(channel)
+        .bind(setup.user_id)
+        .execute(&mut *tx)
+        .await
+        .expect("copy row");
+    let mut guard = vokko_server::forward::CopyGuard::new(&setup.app.state, channel);
+    guard.track(77);
+    drop(guard);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    tx.commit().await.expect("commit");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(setup.storage.read(77).await.is_ok(), "a copy the committed row references stays");
 }
