@@ -25,6 +25,8 @@ npm test --workspace @vokko/desktop
 npm run e2e --workspace @vokko/desktop
 ```
 
+When you touch them, also run: `cargo test -p xtask -p vokko-loadtest -p spotify-bot -p stremio-bot -p vokko-desktop`, `npm test` in `examples/echo-bot`, and `bun install && bun run typecheck && bun test` in each `integrations/*` folder. CI gates on everything above except the media bots, the Tauri crate and the dependency audits (`cargo audit`, `npm audit --omit=dev --audit-level=high`), which run as non-blocking jobs: the bots and the Tauri shell need native libraries, and new advisories would otherwise block unrelated pull requests.
+
 Keep each file's existing line endings. Changes to the wire contract update `docs/api.md`, `crates/protocol/src/api.rs` and `apps/desktop/src/api/types.ts` together. Do not add Discord-owned assets (logos, icons, fonts, sounds, art).
 
 ## Personal data and deployment values never go in commits
