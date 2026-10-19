@@ -21,6 +21,7 @@ import { resumeOnboarding, useRulesPending } from '../community';
 import { fromDisplay, type MentionToken } from './mentionText';
 import { convertEmoticons } from './emoticons';
 import { messageStore } from './messageStore';
+import { isDesktop } from '../desktop/tauri';
 import { TypingIndicator } from './TypingIndicator';
 import { activeTypers } from './messageState';
 import { composerPlaceholder, isSpoilerName, softKeyboard, stripSpoiler } from './util';
@@ -438,8 +439,9 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
       {uploads.length > 0 && <div className="chat-tray" aria-label="Attachments to upload">
         {uploads.map(u => <div key={u.localId} className={`chat-tray-item ${u.status}`}>
           <div className="chat-tray-actions">
-            <Tooltip content="Preview" side="top"><button type="button" className="chat-tray-btn" aria-label={`Preview ${u.file.name}`} disabled={!u.previewUrl}
-              onClick={() => { if (u.previewUrl) window.open(u.previewUrl, '_blank', 'noopener'); }}><Eye size={20} /></button></Tooltip>
+            {/* The desktop host denies blob: popups (popups.rs) and the system browser can't open them, so Preview is web-only. */}
+            {!isDesktop() && <Tooltip content="Preview" side="top"><button type="button" className="chat-tray-btn" aria-label={`Preview ${u.file.name}`} disabled={!u.previewUrl}
+              onClick={() => { if (u.previewUrl) window.open(u.previewUrl, '_blank', 'noopener'); }}><Eye size={20} /></button></Tooltip>}
             <Tooltip content="Edit" side="top"><button type="button" className="chat-tray-btn" aria-label={`Edit ${u.file.name}`} onClick={() => setModifying(u.localId)}><Pencil size={20} /></button></Tooltip>
             <Tooltip content="Remove Attachment" side="top"><button type="button" className="chat-tray-btn chat-tray-remove" aria-label={`Remove ${u.file.name}`} onClick={() => removeUpload(channelId, u.localId)}><Trash2 size={20} /></button></Tooltip>
           </div>
