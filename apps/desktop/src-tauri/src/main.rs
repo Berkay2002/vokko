@@ -174,12 +174,10 @@ fn run_event(app: &AppHandle, event: tauri::RunEvent) {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let logger = logging::install();
     let config_dir = app_dirs::config_dir();
-    if let Some(dir) = &config_dir
-        && let Some(logger) = logger
-        && let Err(error) = logger.attach_dir(&dir.join("logs"))
-    {
-        eprintln!("Vokko: {error}");
-    }
+    // The log file is attached in setup, which only the primary instance reaches: a second launch (a vokko:// link, the OAuth
+    // callback) exits in the single-instance plugin first, so it no longer rotates the running session's log away. Records
+    // from before then wait in the logger's buffer. With VOKKO_MULTI_INSTANCE=1 (dev, e2e) copies still rotate each other's logs.
+    let log_dir = config_dir.as_ref().map(|dir| dir.join("logs"));
     crash::install(config_dir.clone());
     log::info!("starting Vokko local scaffold");
 
@@ -256,7 +254,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 _ => {}
             }
         })
-        .setup(setup)
+        .setup(move |app| {
+            if let (Some(logger), Some(dir)) = (logger, log_dir)
+                && let Err(error) = logger.attach_dir(&dir)
+            {
+                eprintln!("Vokko: {error}");
+            }
+            setup(app)
+        })
         .invoke_handler(tauri::generate_handler![
             dispatch,
             desktop_get_prefs,

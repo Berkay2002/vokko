@@ -241,7 +241,9 @@ impl log::Log for AppLogger {
 }
 
 /// Install the logger (filter from `RUST_LOG`, else [`DEFAULT_FILTER`]); `None` when another
-/// logger was installed first. Call [`AppLogger::attach_dir`] once the settings directory is known.
+/// logger was installed first. Call [`AppLogger::attach_dir`] once the settings directory is known
+/// and this process is the app's only instance (the desktop app does it after the single-instance
+/// check), since attaching rotates the logs.
 pub fn install() -> Option<&'static AppLogger> {
     static LOGGER: OnceLock<AppLogger> = OnceLock::new();
     let spec = std::env::var("RUST_LOG").ok().filter(|s| !s.trim().is_empty());
