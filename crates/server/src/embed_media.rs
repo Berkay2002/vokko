@@ -314,8 +314,9 @@ impl Cache {
 
     /// Whoever runs the download holds its own caller's slot from `admit` (until the download ends). A miss that starts one
     /// awaits it before the download is shared, so a caller waiting for a slot holds up nobody; whoever joins one already under
-    /// way takes no slot, unless the starter goes away and this caller takes the download over: then it waits for a slot of its
-    /// own first (others wait behind it, and run it in turn if it gets none).
+    /// way takes no slot, unless the starter goes away and this caller takes the download over: then it needs a slot of its own
+    /// free right away, or it gives up at once and the next caller waiting on the download takes it over (waiting for a slot
+    /// there would hold up everyone behind it).
     async fn get_or_fetch<G, F: Future<Output = Option<Image>>>(
         &self,
         url: &str,
@@ -346,7 +347,7 @@ impl Cache {
             .get_or_try_init(|| async {
                 let _slot = match admitted {
                     Some(slot) => slot,
-                    None => admit.ok_or(())?.await.ok_or(())?,
+                    None => tokio::time::timeout(Duration::ZERO, admit.ok_or(())?).await.ok().flatten().ok_or(())?,
                 };
                 let image = fetch().await;
                 if let Some(image) = &image {
@@ -501,27 +502,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_joiner_taking_over_a_cancelled_download_waits_for_its_own_slot() {
+    async fn a_joiner_taking_over_a_cancelled_download_needs_a_free_slot_of_its_own() {
         let dir = dir("takeover");
         let cache = Cache::open(dir.clone(), CACHE_MAX_BYTES);
         let url = "https://example.com/a.png";
         let fetches = AtomicUsize::new(0);
-        // an admitted caller starts the download, and one with no free slot joins it
+        // an admitted caller starts the download; one whose address has no free slot joins it, then one whose address has a free slot
         let mut starter = Box::pin(cache.get_or_fetch(url, async { Some(()) }, std::future::pending));
         assert!(tokio::time::timeout(Duration::from_millis(20), &mut starter).await.is_err());
-        let mut joiner = Box::pin(cache.get_or_fetch(url, std::future::pending::<Option<()>>(), || async {
+        let mut slotless = Box::pin(cache.get_or_fetch(url, std::future::pending::<Option<()>>(), || async {
             fetches.fetch_add(1, Ordering::SeqCst);
             Some(("image/png", png(1)))
         }));
-        assert!(tokio::time::timeout(Duration::from_millis(20), &mut joiner).await.is_err());
-        // the starter's client goes away: the joiner takes the download over, but does not run it without a slot of its own
+        assert!(tokio::time::timeout(Duration::from_millis(20), &mut slotless).await.is_err());
+        let mut admitted = Box::pin(get(&cache, url, &fetches, 100));
+        assert!(tokio::time::timeout(Duration::from_millis(20), &mut admitted).await.is_err());
+        // the starter's client goes away: the slotless joiner takes over first, but gives up at once instead of holding up the
+        // next one, which runs the download under its own slot
         drop(starter);
-        assert!(tokio::time::timeout(Duration::from_millis(50), &mut joiner).await.is_err(), "it waits for a slot");
-        assert_eq!(fetches.load(Ordering::SeqCst), 0);
-        assert_eq!(lock(&cache.inflight).len(), 1, "the joiner still uses the cell");
-        drop(joiner);
+        let gave_up = tokio::time::timeout(Duration::from_millis(50), &mut slotless).await.expect("it does not wait for a slot");
+        assert!(gave_up.is_none());
+        let served = tokio::time::timeout(Duration::from_secs(1), &mut admitted).await.expect("the next one runs it");
+        assert_eq!(served, Some(("image/png", png(100))));
+        assert_eq!(fetches.load(Ordering::SeqCst), 1);
         assert!(lock(&cache.inflight).is_empty(), "nobody uses it any more");
-        // so the next miss starts over, with its own slot
+        // so the next miss reads the disk
         assert_eq!(get(&cache, url, &fetches, 100).await, Some(("image/png", png(100))));
         assert_eq!(fetches.load(Ordering::SeqCst), 1);
         let _ = std::fs::remove_dir_all(dir);
