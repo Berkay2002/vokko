@@ -592,6 +592,27 @@ async fn delete_purges_pending_tickets_in_one_go() {
 }
 
 #[tokio::test]
+async fn password_reset_kills_pending_mfa_tickets() {
+    let app = TestApp::new().await;
+    let (token, _) = app.register("relocked").await;
+    app.verify_email("relocked@example.test").await;
+    let (_, enabled) = app.post("/users/@me/mfa/totp/enable", &token, json!({"password": "correct horse battery", "secret": SECRET, "code": totp(0)})).await;
+    let backup = enabled["backup_codes"][0]["code"].as_str().expect("code").to_owned();
+    let (_, step) = login(&app, "relocked", "correct horse battery").await;
+    let stale = step["ticket"].as_str().expect("ticket").to_owned();
+    assert_eq!(app.send(Method::POST, "/auth/forgot", None, Some(json!({"login": "relocked"}))).await.0, StatusCode::NO_CONTENT);
+    let link = app.mailed_token_soon("relocked@example.test", "reset").await;
+    let (status, reset) = app.send(Method::POST, "/auth/reset", None, Some(json!({"token": link, "password": "taking it back now"}))).await;
+    assert_eq!(status, StatusCode::OK, "{reset}");
+    let mfa = |ticket: &str, code: &str| app.send(Method::POST, "/auth/mfa/totp", None, Some(json!({"ticket": ticket, "code": code})));
+    let (status, error) = mfa(&stale, &backup).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(error["errors"]["ticket"].is_object(), "{error}");
+    // the reset's own ticket still finishes the login
+    assert_eq!(mfa(reset["ticket"].as_str().expect("ticket"), &backup).await.0, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn forgot_password_answers_alike_for_unknown_logins() {
     let app = TestApp::new().await;
     app.register("known").await;

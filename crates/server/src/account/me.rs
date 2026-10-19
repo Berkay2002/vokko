@@ -81,8 +81,10 @@ pub async fn cancel_email_change(state: &AppState, user_id: i64, current: &str) 
     Ok(())
 }
 
-/// Deletes the user's sessions (all, or all but `keep`) and closes their gateway connections with 4004.
+/// Deletes the user's sessions (all, or all but `keep`) and pending MFA login tickets, and closes their gateway connections with 4004.
 pub async fn revoke_sessions(state: &AppState, user_id: i64, keep: Option<&[u8]>) -> ApiResult<()> {
+    // a ticket from a login with the old password must not finish into a new session
+    sqlx::query("DELETE FROM mfa_tickets WHERE user_id = $1").bind(user_id).execute(&state.db).await?;
     let hashes: Vec<(Vec<u8>,)> = sqlx::query_as("DELETE FROM sessions WHERE user_id = $1 AND ($2::bytea IS NULL OR token_hash <> $2) RETURNING token_hash")
         .bind(user_id)
         .bind(keep)
