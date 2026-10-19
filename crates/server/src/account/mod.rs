@@ -25,6 +25,9 @@ use mail::Mailer;
 pub use me::DUMMY_HASH;
 use tokens::Purpose;
 
+/// At most one verification mail a minute per account through `/auth/verify/resend`.
+const VERIFY_COOLDOWN_SECONDS: f64 = 60.0;
+
 /// Account services held by the app state.
 pub struct Accounts {
     pub mailer: Mailer,
@@ -132,6 +135,21 @@ async fn verify_email(State(state): State<AppState>, ApiJson(body): ApiJson<Veri
 async fn resend_verification(State(state): State<AppState>, AuthUser(user_id): AuthUser) -> ApiResult<StatusCode> {
     let (email, verified, pending): (String, bool, Option<String>) =
         sqlx::query_as("SELECT email, email_verified, pending_email FROM users WHERE id = $1").bind(user_id).fetch_one(&state.db).await?;
+    if pending.is_some() || !verified {
+        // the live link's age tells when the last one went out
+        let left: Option<(f64,)> = sqlx::query_as(
+            "SELECT EXTRACT(EPOCH FROM expires_at - now())::float8 FROM email_tokens WHERE user_id = $1 AND purpose = 'verify' AND expires_at > now()",
+        )
+        .bind(user_id)
+        .fetch_optional(&state.db)
+        .await?;
+        if let Some((left,)) = left {
+            let wait = VERIFY_COOLDOWN_SECONDS - (tokens::VERIFY_TTL.as_secs_f64() - left);
+            if wait > 0.0 {
+                return Err(ApiErr::rate_limited(wait));
+            }
+        }
+    }
     match (pending, verified) {
         (Some(pending), _) => send_verification(&state, user_id, &pending).await?,
         (None, false) => send_verification(&state, user_id, &email).await?,

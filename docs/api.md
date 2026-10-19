@@ -22,7 +22,7 @@ General rules:
 | GET | /auth/instance | `InstanceInfo`: registration open/closed, minimum age, terms checkbox text, `email_verification` (the instance sends mail, so emails get verified) (no auth) |
 | POST | /auth/username-attempt | `{username}` → `{taken}`; invalid names → 400 50035 `errors.username` (no auth; rate limited per address) |
 | POST | /auth/verify | `{token}` from an emailed link → 204; confirms the address (or switches to the pending new address) |
-| POST | /auth/verify/resend | auth required; 204; mails a fresh link to the pending or unverified address |
+| POST | /auth/verify/resend | auth required; 204; mails a fresh link to the pending or unverified address; at most once a minute per account, else 429 `RateLimitError` with `Retry-After` |
 | POST | /auth/mfa/totp | `{ticket, code}` → `AuthResponse`; `code` is a 6-digit TOTP code or an unused backup code. Tickets live 5 minutes and allow 5 wrong codes |
 | POST | /auth/forgot | `{login}` (email or username) → 204 always; mails a reset link when the account exists |
 | POST | /auth/reset | `{token, password}` → `LoginResponse`; sets the password, verifies the email, revokes every session |

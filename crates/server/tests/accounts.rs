@@ -129,6 +129,12 @@ async fn registration_mails_a_single_use_verification_link() {
     let first = app.mailed_token("verifyme@example.test", "verify");
     assert_eq!(first.len(), 64);
 
+    // one mail a minute per account
+    let (status, error) = app.post("/auth/verify/resend", &token, json!({})).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert!(error["retry_after"].as_f64().is_some_and(|wait| wait > 0.0 && wait <= 60.0));
+    sqlx::query("UPDATE email_tokens SET expires_at = expires_at - interval '61 seconds'").execute(&app.state.db).await.expect("age link");
+
     // a resend replaces the earlier link
     assert_eq!(app.post("/auth/verify/resend", &token, json!({})).await.0, StatusCode::NO_CONTENT);
     let second = app.mailed_token("verifyme@example.test", "verify");
