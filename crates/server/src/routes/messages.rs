@@ -738,16 +738,32 @@ async fn create_message(
     let ping_replied = body.allowed_mentions.as_ref().and_then(|allowed| allowed.replied_user).unwrap_or(true);
     let kind = if reference.is_some() { MessageType::Reply } else { MessageType::Default };
     let mentions = if forwarding { Resolved { users: Vec::new(), roles: Vec::new(), everyone: false } } else { mentions };
-    // AutoMod after the request is validated, so a blocked message ran into no other error first; its alert and timeout wait for
-    // the insert. Slowmode deliberately comes after it: a blocked message must not use up the member's slowmode slot.
-    let screening = crate::safety::check_send(&state, &access, user_id, &screened, &content).await?;
-    check_slowmode(&state, &access, user_id).await?;
-    // Last step before the insert: it copies files, and nothing after it may fail without cleaning them up.
+    // A forward copies files here: every error from now until the insert must remove them again.
     let forward = match forward_source {
         Some((source_channel, source_message)) => {
             Some(forward::prepare(&state, user_id, source_channel, source_message, &access.channel, access.permissions).await?)
         }
         None => None,
+    };
+    // A forward is screened on the content it copies, like the same text sent as a message.
+    let (screened, plain) = match &forward {
+        Some(forward) => (forward.snapshot.message.content.clone(), forward.snapshot.message.content.clone()),
+        None => (screened, content.clone()),
+    };
+    // AutoMod after the request is validated, so a blocked message ran into no other error first; its alert and timeout wait for
+    // the insert. Slowmode deliberately comes after it: a blocked message must not use up the member's slowmode slot.
+    let checked: ApiResult<_> = async {
+        let screening = crate::safety::check_send(&state, &access, user_id, &screened, &plain).await?;
+        check_slowmode(&state, &access, user_id).await?;
+        Ok(screening)
+    }
+    .await;
+    let screening = match checked {
+        Ok(screening) => screening,
+        Err(error) => {
+            media::remove_files(&state, &forward.as_ref().map(ForwardDraft::copy_ids).unwrap_or_default()).await;
+            return Err(error);
+        }
     };
     let draft = Draft { content, kind, reference, attachments, nonce: body.nonce, mentions, ping_replied, stickers, forward };
     // Everything is validated: a message into a thread reopens it if it is archived (the UPDATE's `AND archived` guards it, and

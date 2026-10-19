@@ -340,6 +340,25 @@ async fn forward_rejects_what_the_caller_cannot_read_with_the_unknown_message_an
 }
 
 #[tokio::test]
+async fn automod_screens_a_forward_on_its_snapshot_and_removes_the_copies() {
+    let w = world().await;
+    let rule =
+        json!({"name": "No bad words", "event_type": 1, "trigger_type": 1, "trigger_metadata": {"keyword_filter": ["free money"]}, "actions": [{"type": 1}]});
+    let (status, body) = w.app.post(&format!("/guilds/{}/auto-moderation/rules", w.guild), &w.owner, rule).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // The owner is exempt from AutoMod, so the source gets through; a member forwarding it must not.
+    let attachment = upload(&w.app, &w.owner, &w.channel, "pic.png", &png(4, 4, 0)).await;
+    let (status, source) = w.say(&w.owner, &w.channel, json!({"content": "get free money", "attachments": [{"id": attachment["id"]}]})).await;
+    assert_eq!(status, StatusCode::OK, "{source}");
+    let files = || std::fs::read_dir(w.app.data_dir.join("attachments")).expect("attachments dir").count();
+    let before = files();
+    let reference = json!({"type": 1, "message_id": source["id"], "channel_id": w.channel});
+    let (status, body) = w.say(&w.member, &w.channel, json!({"message_reference": reference})).await;
+    assert_eq!((status, body["code"].clone()), (StatusCode::BAD_REQUEST, json!(200000)), "{body}");
+    assert_eq!(files(), before, "the blocked forward's file copies are removed");
+}
+
+#[tokio::test]
 async fn forwarding_to_a_dm_and_forwarding_a_forward() {
     let w = world().await;
     let (bob, friend) = w.app.register("bob").await;
