@@ -151,7 +151,8 @@ fn is_public_v4(ip: Ipv4Addr) -> bool {
 }
 
 /// False for loopback, private, link-local, CGNAT, multicast, documentation and other non-routable addresses,
-/// including IPv4 addresses wrapped in IPv6 (mapped, compatible, NAT64, 6to4).
+/// including IPv4 addresses wrapped in IPv6 (mapped, compatible, translated, NAT64, 6to4) and the local-use
+/// NAT64 range 64:ff9b:1::/48.
 pub fn is_public_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => is_public_v4(v4),
@@ -167,13 +168,17 @@ fn is_public_v6(ip: Ipv6Addr) -> bool {
     if ip.is_unspecified() || ip.is_loopback() {
         return false;
     }
-    // ::a.b.c.d (IPv4-compatible)
-    if s[..6].iter().all(|segment| *segment == 0) {
+    // ::/16 is reserved: ::a.b.c.d (IPv4-compatible) and ::ffff:0:a.b.c.d (IPv4-translated); mapped is handled above
+    if s[0] == 0 {
         return false;
     }
     // 64:ff9b::/96 (NAT64) and 2002::/16 (6to4) carry an IPv4 address
     if s[0] == 0x64 && s[1] == 0xff9b && s[2..6].iter().all(|segment| *segment == 0) {
         return is_public_v4(Ipv4Addr::new((s[6] >> 8) as u8, s[6] as u8, (s[7] >> 8) as u8, s[7] as u8));
+    }
+    // rest of 64:ff9b::/32, including 64:ff9b:1::/48 (local-use NAT64, where the IPv4 bits depend on the prefix length)
+    if s[0] == 0x64 && s[1] == 0xff9b {
+        return false;
     }
     if s[0] == 0x2002 {
         return is_public_v4(Ipv4Addr::new((s[1] >> 8) as u8, s[1] as u8, (s[2] >> 8) as u8, s[2] as u8));
@@ -715,6 +720,9 @@ mod tests {
             "::ffff:10.0.0.1",
             "::127.0.0.1",
             "64:ff9b::7f00:1",
+            "64:ff9b:1::a9fe:a9fe",
+            "64:ff9b:1:a9fe:a900:fe00::",
+            "::ffff:0:a9fe:a9fe",
             "2002:7f00:1::1",
             "2001:db8::1",
         ];
