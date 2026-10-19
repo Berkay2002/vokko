@@ -6534,7 +6534,7 @@ dependencies = [
  "axum",
  "futures-util",
  "livekit",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reqwest 0.13.5",
  "rustls 0.23.46",
  "serde",
@@ -8022,7 +8022,7 @@ name = "vokko-loadtest"
 version = "0.1.13"
 dependencies = [
  "futures-util",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reqwest 0.13.5",
  "rustls 0.23.46",
  "serde",
@@ -8063,7 +8063,7 @@ dependencies = [
  "lettre",
  "oauth2",
  "openidconnect",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reqwest 0.13.5",
  "rsa",
  "rustls 0.23.46",
