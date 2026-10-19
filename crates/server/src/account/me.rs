@@ -35,9 +35,10 @@ pub async fn confirm_password(state: &AppState, user_id: i64, password: Option<S
     let mismatch = || ApiErr::invalid("password", "Password does not match.");
     let Some(password) = password.filter(|password| !password.is_empty()) else { return Err(mismatch()) };
     let attempt = super::security::begin_attempt(state, "password_failures", user_id, "Too many wrong passwords. Try again in 15 minutes.").await?;
-    let accepted = verify_password(password, hash).await;
-    super::security::end_attempt(state, "password_failures", attempt, accepted).await?;
-    if accepted { Ok(()) } else { Err(mismatch()) }
+    let verified = verify_password(password, hash).await;
+    // a busy server (429) is not a wrong password: it does not count
+    super::security::end_attempt(state, "password_failures", attempt, !matches!(verified, Ok(false))).await?;
+    if verified? { Ok(()) } else { Err(mismatch()) }
 }
 
 /// Confirms it is really the account owner before a sensitive change. Accounts with a password give it (and with

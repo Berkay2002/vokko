@@ -620,6 +620,7 @@ Security rules (review of PR #10):
 - Failed second-factor codes are counted per account across tickets and routes: 10 failures in 15 minutes, then 429 until the window passes.
 - Wrong current passwords (the `password` of the identity check, on every route above and OAuth link) are counted per account the same way, apart from codes: 10 in 15 minutes, then 429 "Too many wrong passwords." until the window passes, even for the right password. A right password does not count; a missing one is refused without counting.
 - `/auth/forgot` does its work after answering, so known and unknown logins take the same time.
+- Password hashing runs at most 4 at a time server-wide. A request that needs it (register, login, setting or checking a password) and finds no free slot within 2 s answers 429 `RateLimitError` "The server is busy. Try again in a moment." with `retry_after` 2 and `Retry-After`; it does not count as a wrong password.
 - Invalid `VOKKO_SMTP_*` settings stop the server at start; mail goes to the log only when `VOKKO_SMTP_HOST` is unset.
 
 Security rules, round 2:

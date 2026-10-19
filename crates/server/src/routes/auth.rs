@@ -81,10 +81,10 @@ async fn login(State(state): State<AppState>, headers: HeaderMap, ApiJson(body):
     let invalid = || ApiErr::invalid("login", "Login or password is invalid.");
     let Some((id, Some(hash))) = row else {
         // Spend the same time as a real verification.
-        let _ = verify_password(body.password, account::DUMMY_HASH.to_owned()).await;
+        verify_password(body.password, account::DUMMY_HASH.to_owned()).await?;
         return Err(invalid());
     };
-    if !verify_password(body.password, hash).await {
+    if !verify_password(body.password, hash).await? {
         return Err(invalid());
     }
     Ok(Json(account::security::finish_login(&state, id, &headers).await?))
