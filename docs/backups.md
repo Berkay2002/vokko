@@ -3,7 +3,7 @@
 A Vokko server's state is two things: the Postgres database (users, messages, everything structured) and the server's
 data dir, `VOKKO_DATA_DIR` (uploads under `attachments/`; with `VOKKO_STORAGE=s3` they live in the bucket instead, back that
 up with the bucket's own versioning). `incoming/` only holds half-finished uploads and is skipped. Link-preview images
-(`embed_media`) are proxied, never stored, so there is nothing else to save.
+are only cached (`embed-media/`, fetched again when missing), so there is nothing else to save.
 
 | Script | Does |
 |---|---|

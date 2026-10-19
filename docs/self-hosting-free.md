@@ -95,7 +95,7 @@ For when you cannot get (or do not want) a VM with a disk: managed Postgres, a b
    # VOKKO_S3_SERVE=presigned                      # optional, see below
    ```
 
-   Migrations run on start, so the first boot sets up the schema. No volume is needed: with `VOKKO_STORAGE=s3` the server writes nothing to disk.
+   Migrations run on start, so the first boot sets up the schema. No persistent volume is needed with `VOKKO_STORAGE=s3`, but the server still uses scratch space under `VOKKO_DATA_DIR`: uploads are staged in `incoming/` until they reach the bucket (cleared on start), so allow about `VOKKO_MAX_UPLOAD_MB` times the number of concurrent uploads (at most 3 per user), and link-preview images are cached in `embed-media/` (up to 512 MiB, safe to lose).
 4. Serve the web client (`deploy/web.Dockerfile`, or any static host such as Cloudflare Pages with `VITE_VOKKO_API` set at build time). On another origin than the API, list it in `VOKKO_CORS_ORIGINS`.
 
 **Bucket keys:** give the key read, write and delete on the one bucket only (the R2 token above does). On AWS S3 also grant list (`s3:ListBucket`): without it AWS answers 403 instead of 404 for a missing object, so forwarding a message whose file is gone fails with 500 instead of dropping that file. R2, B2 and MinIO answer 404 either way. Endpoints: R2 `https://<account id>.r2.cloudflarestorage.com`, B2 `https://s3.<region>.backblazeb2.com`, Supabase Storage `https://<project>.supabase.co/storage/v1/s3`, AWS `https://s3.<region>.amazonaws.com` (the regional one: the server does not follow S3's redirects).
@@ -126,7 +126,7 @@ LiveKit Cloud's free "Build" plan (October 2026): 5,000 WebRTC participant-minut
 
 1. Create a project at cloud.livekit.io, then an API key under Settings > Keys.
 2. Set `VOKKO_LIVEKIT_URL=wss://<project>.livekit.cloud`, `VOKKO_LIVEKIT_API_KEY`, `VOKKO_LIVEKIT_API_SECRET`.
-3. Add a webhook (Settings > Webhooks) signed with the same key, pointing at `https://chat.example.com/internal/livekit/webhook`. With a self-hosted LiveKit that path stays off the reverse proxy; LiveKit Cloud has to reach it over the internet, so forward exactly that path (Caddy: add `/internal/livekit/webhook` to the `@vokko` matcher; requests without a valid signature get 401). The webhook is required: vokko-server drops a voice join that LiveKit does not confirm with `participant_joined` within 15 seconds.
+3. Add a webhook (Settings > Webhooks) signed with the same key, pointing at `https://chat.example.com/internal/livekit/webhook`. With a self-hosted LiveKit that path stays off the reverse proxy; LiveKit Cloud has to reach it over the internet, so forward exactly that path (Caddy: add `/internal/livekit/webhook` to the `@vokko` matcher; requests without a valid signature get 401). The webhook is required: vokko-server drops a voice join that LiveKit does not confirm with `participant_joined` within `VOKKO_VOICE_CONNECT_TIMEOUT_SECS` (default 30 s).
 
 When the allowance runs out, joining a voice channel fails until the month resets; text chat is unaffected.
 
