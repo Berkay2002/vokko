@@ -91,7 +91,7 @@ is the base64 SHA-256 of the body; reject anything else with 401. Events used:
 | Event | Effect |
 | --- | --- |
 | `participant_joined` | state `connected = true` (match identity + room + `metadata.session_id`; stale session → `RemoveParticipant`) |
-| `participant_left` | if the session matches the current state: remove it and broadcast `channel_id: null` |
+| `participant_left` | if the session, the latest token and the last joined participant `sid` match the current state: remove it and broadcast `channel_id: null` |
 | `track_published` / `track_unpublished` | set `self_video` (source camera) / `self_stream` (source screen_share) from truth, broadcast; screenshare above the guild's cap → `MutePublishedTrack` (§4.4) |
 | `room_finished` | sweep any states still pointing at the room; end the DM call if it was one (§4.2) |
 

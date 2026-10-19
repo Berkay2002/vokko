@@ -660,6 +660,32 @@ async fn a_reconnects_old_connection_leaving_never_ends_the_state() {
     assert!(owner.wait_for("VOICE_STATE_UPDATE").await["channel_id"].is_null());
 }
 
+/// A client that reconnects to LiveKit on its own (same identity and token, new participant sid): the superseded participant
+/// leaving after its replacement joined does not end the state; the replacement leaving does.
+#[tokio::test]
+async fn a_superseded_participant_leaving_never_ends_the_state() {
+    let w = world().await;
+    let alice_id: i64 = w.alice_id.parse().expect("id");
+    let (mut owner, _) = Client::identify(&w.address, &w.owner).await;
+    let (mut alice, _) = Client::identify(&w.address, &w.alice).await;
+    alice.voice(Some(&w.voice), false).await;
+    alice.voice_answer().await;
+    let session = owner.wait_for("VOICE_STATE_UPDATE").await["session_id"].as_str().expect("session").to_owned();
+    let nonce = w.nonce(&w.alice_id);
+    let with_sid = |sid: &str| {
+        let mut participant = w.participant(&w.alice_id, &session, &nonce);
+        participant["sid"] = json!(sid);
+        participant
+    };
+    assert_eq!(w.event("participant_joined", with_sid("PA_a")).await, StatusCode::OK);
+    assert_eq!(w.event("participant_joined", with_sid("PA_b")).await, StatusCode::OK);
+    assert_eq!(w.event("participant_left", with_sid("PA_a")).await, StatusCode::OK);
+    assert!(w.app.state.voice.get(alice_id).expect("the state survives A leaving").connected);
+    assert!(owner.silent_for("VOICE_STATE_UPDATE", Duration::from_millis(200)).await);
+    assert_eq!(w.event("participant_left", with_sid("PA_b")).await, StatusCode::OK);
+    assert!(owner.wait_for("VOICE_STATE_UPDATE").await["channel_id"].is_null());
+}
+
 /// Reconciliation removes LiveKit participants that match no voice state (e.g. a kick whose RemoveParticipant failed), and
 /// spares users with a fresh binding.
 #[tokio::test]

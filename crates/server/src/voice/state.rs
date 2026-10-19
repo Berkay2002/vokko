@@ -68,6 +68,9 @@ pub struct VoiceEntry {
     pub request_to_speak: Option<OffsetDateTime>,
     /// LiveKit reported the participant (webhook or reconciliation).
     pub connected: bool,
+    /// LiveKit sid of the participant that joined with the latest token (`""` until one is seen): a superseded connection with
+    /// the same identity and token (a client that reconnected on its own) leaving does not end the state.
+    pub participant_sid: String,
     pub connected_at: OffsetDateTime,
     /// Rebuilt from LiveKit at this moment and not claimed by an op 4 since.
     pub unbound_since: Option<Instant>,
@@ -362,6 +365,7 @@ pub async fn handle_command(state: &AppState, session: &Arc<Session>, command: V
                 current.token_nonce = nonce.clone();
                 current.issued_at = issued;
                 current.connected = false;
+                current.participant_sid.clear();
                 current.permissions = fresh.permissions;
                 current.suppress = fresh.suppress;
             }
@@ -438,6 +442,7 @@ pub async fn handle_command(state: &AppState, session: &Arc<Session>, command: V
         deaf,
         request_to_speak: None,
         connected: false,
+        participant_sid: String::new(),
         connected_at: OffsetDateTime::now_utc(),
         unbound_since: None,
     };
@@ -823,6 +828,7 @@ async fn restore_backend(state: &AppState, backend: usize) -> Result<(), String>
                 deaf,
                 request_to_speak: None,
                 connected: true,
+                participant_sid: participant.sid.clone(),
                 connected_at: OffsetDateTime::now_utc(),
                 unbound_since: Some(Instant::now()),
             };
@@ -970,7 +976,10 @@ pub(crate) async fn participant_joined(state: &AppState, backend: usize, channel
     let _serial = state.voice.user_lock(user_id).await;
     let marked = state.voice.update_if(user_id, |entry| {
         let matches = entry.channel_id == channel_id && entry.backend == backend && latest_token(entry, participant);
-        entry.connected |= matches;
+        if matches {
+            entry.connected = true;
+            entry.participant_sid.clone_from(&participant.sid);
+        }
         matches
     });
     if marked.is_none() && state.voice.get(user_id).is_none_or(|entry| entry.channel_id != channel_id || entry.backend != backend) {
@@ -986,7 +995,8 @@ pub(crate) async fn participant_left(state: &AppState, backend: usize, channel_i
     let _serial = state.voice.user_lock(user_id).await;
     let removed = state.voice.remove_if(user_id, |entry| {
         let stale = created_at.is_some_and(|at| at < entry.connected_at.unix_timestamp());
-        entry.channel_id == channel_id && entry.backend == backend && latest_token(entry, participant) && !stale
+        let superseded = !entry.participant_sid.is_empty() && !participant.sid.is_empty() && entry.participant_sid != participant.sid;
+        entry.channel_id == channel_id && entry.backend == backend && latest_token(entry, participant) && !stale && !superseded
     });
     if let Some(entry) = removed {
         broadcast(state, &entry, true).await;
@@ -1152,6 +1162,7 @@ pub async fn move_member(state: &AppState, guild_id: i64, user_id: i64, channel_
     entry.token_nonce = nonce.clone();
     entry.issued_at = issued;
     entry.connected = false;
+    entry.participant_sid.clear();
     entry.permissions = permissions;
     entry.stage = stage;
     entry.suppress = stage || permissions & SPEAK == 0;
