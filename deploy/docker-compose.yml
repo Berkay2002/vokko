@@ -31,6 +31,9 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # Every key in .env reaches the server (mail, sign-in providers incl. the dynamic VOKKO_OIDC_<NAME>_*, CORS, ...);
+    # the entries below win over it.
+    env_file: .env
     environment:
       DATABASE_URL: postgres://vokko:${POSTGRES_PASSWORD}@postgres:5432/vokko
       VOKKO_BIND: 0.0.0.0:8710

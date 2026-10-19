@@ -41,7 +41,7 @@ Desktop (Tauri) clients connect to `VOKKO_PUBLIC_URL` directly; their `tauri://l
 
 ## Configuration
 
-Read by `vokko-server` from the environment (a `.env.dev` file found from the working directory upwards is a fallback for development; the container uses real environment variables). Compose maps the `.env` file onto these.
+Read by `vokko-server` from the environment (a `.env.dev` file found from the working directory upwards is a fallback for development; the container uses real environment variables). Compose passes every key of `deploy/.env` into the server container (`env_file`), so any variable below can be set there; the entries in the compose file's `environment:` (`DATABASE_URL`, `VOKKO_BIND`, `VOKKO_DATA_DIR`, `VOKKO_DESKTOP_LATEST_JSON`) take precedence.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
