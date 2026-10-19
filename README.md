@@ -21,7 +21,7 @@ xtask/                       dependency-layer check and privacy guard
 docs/                        API contract, architecture, self-hosting, parity roadmap
 ```
 
-The wire contract is [docs/api.md](docs/api.md). Rust types live in `crates/protocol/src/api.rs`, their TypeScript twins in `apps/desktop/src/api/types.ts`. Background: [docs/architecture.md](docs/architecture.md).
+The wire contract is [docs/api.md](docs/api.md). Rust types live in `crates/protocol/src/api.rs`, their TypeScript twins in `apps/desktop/src/api/types.ts`. Initial engine/desktop architecture (historical, with a summary of the current server): [docs/architecture.md](docs/architecture.md).
 
 ## Run it locally
 
