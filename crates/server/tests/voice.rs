@@ -15,7 +15,7 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tower::ServiceExt;
-use vokko_protocol::api::permissions::{CONNECT, MOVE_MEMBERS, SPEAK, STREAM, VIEW_CHANNEL};
+use vokko_protocol::api::permissions::{CONNECT, MANAGE_CHANNELS, MOVE_MEMBERS, MUTE_MEMBERS, SPEAK, STREAM, VIEW_CHANNEL};
 use vokko_server::config::{Config, LiveKitConfig};
 use vokko_server::voice::livekit::{FakeRoomService, Participant, RoomService};
 use vokko_server::voice::token;
@@ -1227,6 +1227,26 @@ async fn stage_audience_raise_hand_invite_and_end() {
     assert_eq!(w.app.delete(&format!("/stage-instances/{stage}"), &w.alice).await.0, StatusCode::FORBIDDEN);
     assert_eq!(w.app.delete(&format!("/stage-instances/{stage}"), &w.owner).await.0, StatusCode::NO_CONTENT);
     assert_eq!(carl.wait_for("STAGE_INSTANCE_DELETE").await["topic"], "Again");
+}
+
+#[tokio::test]
+async fn stage_ends_when_the_last_moderator_loses_the_role() {
+    let w = world_with(livekit, FakeRoomService::new()).await;
+    let stage = w.create_channel("Town Hall", 13).await;
+    let (mut alice, _) = Client::identify(&w.address, &w.alice).await;
+    let (mut carl, _) = Client::identify(&w.address, &w.carl).await;
+    let moderator = (MANAGE_CHANNELS | MUTE_MEMBERS | MOVE_MEMBERS).to_string();
+    let (_, role) = w.app.post(&format!("/guilds/{}/roles", w.guild), &w.owner, json!({"name": "stage mods", "permissions": moderator})).await;
+    let role = role["id"].as_str().expect("role").to_owned();
+    assert_eq!(w.edit_member(&w.owner, &w.alice_id, json!({"roles": [role]})).await.0, StatusCode::OK);
+    join(&mut alice, &stage).await;
+    let (status, _) = w.app.post("/stage-instances", &w.alice, json!({"channel_id": stage, "topic": "Talk"})).await;
+    assert_eq!(status, StatusCode::OK);
+
+    // She stays in the channel but loses the role: no moderator is left, so the stage ends.
+    assert_eq!(w.edit_member(&w.owner, &w.alice_id, json!({"roles": []})).await.0, StatusCode::OK);
+    assert_eq!(carl.wait_for("STAGE_INSTANCE_DELETE").await["channel_id"].as_str(), Some(stage.as_str()));
+    assert!(w.app.state.voice.get(w.alice_id.parse().expect("id")).is_some(), "still in the stage");
 }
 
 // ---- multiple LiveKit backends with failover ----

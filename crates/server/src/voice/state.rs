@@ -1115,7 +1115,7 @@ async fn recompute_user(state: &AppState, guild_id: i64, user_id: i64) {
             }
         }
         Some(permissions) => {
-            modify(state, user_id, |current| {
+            let after = modify(state, user_id, |current| {
                 current.permissions = permissions;
                 if !current.stage {
                     current.suppress = permissions & SPEAK == 0;
@@ -1123,6 +1123,13 @@ async fn recompute_user(state: &AppState, guild_id: i64, user_id: i64) {
                 true
             })
             .await;
+            if after.is_some_and(|after| after.stage && entry.moderator() && !after.moderator()) {
+                // A stage moderator lost the moderator permissions in place: as if they had left. Spawned, as release_channel
+                // does: the admission lock is held here, and ending the stage demotes others.
+                let state = state.clone();
+                let channel_id = entry.channel_id;
+                tokio::spawn(async move { super::stage::end_if_live(&state, channel_id).await });
+            }
         }
     }
 }

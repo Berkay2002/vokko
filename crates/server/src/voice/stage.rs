@@ -196,7 +196,8 @@ pub async fn end_stage_of_event(state: &AppState, channel_id: i64, event_id: i64
     end_stage(state, channel_id).await
 }
 
-/// Called after someone left `channel_id`: with no stage moderator left inside, a live stage ends.
+/// Called after someone left `channel_id` or lost the moderator permissions there: with no stage moderator left inside, a
+/// live stage ends.
 pub(crate) async fn end_if_live(state: &AppState, channel_id: i64) {
     if state.voice.all().iter().any(|entry| entry.channel_id == channel_id && entry.moderator()) {
         return;
