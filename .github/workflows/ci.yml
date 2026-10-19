@@ -185,6 +185,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     continue-on-error: true
+    env:
+      # Native voice's webrtc-sys links a libwebrtc.a built against Chromium's libc++, which needs clang 21 or later
+      # (it refuses GCC); Ubuntu 24.04 ships clang 18, so clang 21 comes from apt.llvm.org (key checked by fingerprint).
+      CC: clang-21
+      CXX: clang++-21
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -192,10 +197,16 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: webkit deps
+      # libasound2-dev for cpal (native voice), libdbus-1-dev for tao's dbus feature.
+      - name: native deps
         run: |
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/llvm.gpg
+          gpg --show-keys --with-colons /usr/share/keyrings/llvm.gpg | grep -q '^fpr:::::::::6084F3CF814B57C1CF12EFD515CF4D18AF4F7421:'
+          echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] https://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-21 main" |
+            sudo tee /etc/apt/sources.list.d/llvm-21.list
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev pkg-config libssl-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev pkg-config libssl-dev \
+            libasound2-dev libdbus-1-dev clang-21
       - run: npm ci
       # tauri.conf.json's frontendDist is checked at build time, so build the UI first.
       - name: build ui
