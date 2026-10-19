@@ -61,7 +61,7 @@ All shas confirmed present in `git log --oneline main..HEAD` and not reverted. "
 | deps-ci-tests-docs-5 | low | README gave the VOKKO_MAX_UPLOAD_MB default as 25 (real: 500) | README.md:49 | e114375d | | yes |
 | deps-ci-tests-docs-6 | low | docs/architecture.md described the original skeleton. Now marked historical with a current-shape section | docs/architecture.md:3 | f4d4009a | | yes |
 | uploads-outbound-ssrf-3 | medium | Embed-media proxy: a joiner taking over a cancelled download ran it without a per-address slot, so one address could fill every server-wide download slot; a cancelled starter orphaned its inflight cell. Now whoever runs a download holds its own caller's slot (a slotless takeover gives up at once), and the cell is forgotten once nobody uses it. Redone after the first attempt was reverted (section 3), reviewed twice | crates/server/src/embed_media.rs:304 | 0af6be9e, 0966587b | | |
-| server-messages-threads-6 | low | Poll answer custom emoji were only shape-checked, so members could attach role-restricted, external or made-up emoji. Now resolved like reactions (10014 unknown, 50013 unusable, USE_EXTERNAL_EMOJIS; stored name kept) | crates/server/src/polls.rs:55 | audit-followups | yes | yes |
+| server-messages-threads-6 | low | Poll answer custom emoji were only shape-checked, so members could attach role-restricted, external or made-up emoji. Now resolved like reactions (10014 unknown, 50013 unusable, USE_EXTERNAL_EMOJIS; stored name kept) | crates/server/src/polls.rs:55 | 42892c41 | yes | yes |
 
 Notes on fixed items:
 - The new CI `privacy` job must be added to required checks if branch protection lists them.
@@ -185,13 +185,13 @@ e2e detail:
 4. **Done** (section 9). **Fix server-guild-permissions-1** (AutoMod bypass through forwards) and voice-livekit-games-1 (reconnect drops voice state).
 5. **Partly done**: three decided and fixed, client-ui-rendering-perf-4 still open (section 9). **Make the product decisions** on gateway-realtime-6 (session cap), storage-sql-migrations-4 (offsite backup deletion), tauri-host-2 (.deb updates) and client-ui-rendering-perf-4 (embed video proxying).
 6. **Partly done**: mock, audit job (advisory) and CI coverage landed; adding the privacy job to required checks is a repository setting, still open (section 9). **Close test and CI gaps.** Mirror the new password lockout and slash-command rules in the desktop mock. Add the CI `privacy` job to required checks. Add dependency audit jobs (deps-ci-tests-docs-11) and CI coverage for tools and the Tauri crate (deps-ci-tests-docs-3).
-7. **Open**: the check did not finish (section 9). **Verify on Unix:** compile and smoke-test the SIGTERM handling (2f7b7824) and the native-voice output switch (751549fb) on Linux, ideally with `docker compose stop` timing and the `live_room` harness.
+7. **Done** (section 9). **Verify on Unix:** compile and smoke-test the SIGTERM handling (2f7b7824) and the native-voice output switch (751549fb) on Linux, ideally with `docker compose stop` timing and the `live_room` harness.
 8. **Done**, stremio root cause was a clock mismatch, not WAIT; other flaky e2e tests remain (section 9). **Deflake** `e2e/apply-to-join.spec.ts:124` and `e2e/block-confirm.spec.ts:156` and raise or scale `common::WAIT` for the stremio tests.
 9. **Partly done**: 38 fixed, 3 refuted, 8 left (section 9). **Work through the section 6 list.** Cheap docs fixes first (voice-livekit-games-3, deps-ci-tests-docs-7, -13, deploy-config-secrets-7), then server-auth-accounts-6 and uploads-outbound-ssrf-6.
 
 ## 9. Follow-up round
 
-Branch `audit-followups` (on top of `main`, which holds the first round): 56 commits, all listed by `git log --oneline main..HEAD`. One sets line endings (c02748e8, `.gitattributes` keeps text files LF); the rest fix the items below, one commit per item plus review follow-ups. Nothing was reverted.
+Branch `audit-followups` (on top of `main`, which holds the first round): every commit is listed by `git log --oneline main..HEAD`. One sets line endings (c02748e8, `.gitattributes` keeps text files LF); the rest fix the items below, one commit per item plus review follow-ups. Nothing was reverted.
 
 ### Owner decisions
 
@@ -208,8 +208,8 @@ Branch `audit-followups` (on top of `main`, which holds the first round): 56 com
 | Id | Title | Commits | API | Docs |
 |---|---|---|---|---|
 | server-auth-accounts-2 | Unbounded argon2 semaphore queue (now a 2 s wait, then 429 busy with Retry-After; hashing before side effects) | 7b26740d, b3da6ab8 | | |
-| server-auth-accounts-3 | No per-account cooldown on verification mail (now 60 s, 429 with Retry-After) | b8836742 | yes | yes |
-| server-guild-permissions-1 | Forwards bypass AutoMod keyword, regex and spam rules | 48c1f3cb, 6ad5ffe1 | yes | yes |
+| server-auth-accounts-3 | No per-account cooldown on verification mail (now 60 s, 429 with Retry-After; check and new link in one transaction under the user row lock, also for password reset) | b8836742, 88c716ce | yes | yes |
+| server-guild-permissions-1 | Forwards bypass AutoMod keyword, regex and spam rules (files are copied only after every gate passed; a dropped request removes its copies unless the forward committed) | 48c1f3cb, 6ad5ffe1, 9b032200, b8c5d7ac | yes | yes |
 | voice-livekit-games-1 | `participant_left` for a superseded participant removes the live voice state | 111a3974 | | yes |
 | gateway-realtime-6 | No cap on concurrent gateway sessions per user | 6a6e9214 | yes | yes |
 | storage-sql-migrations-4 | Offsite `rsync --delete` mirrors a local loss and wipes offsite history | 2ac56a67 | yes | yes |
@@ -230,8 +230,8 @@ Branch `audit-followups` (on top of `main`, which holds the first round): 56 com
 | client-api-types-3 | Client moderation checks differ from server (timeout clamp, role tie-break) | 2cc66443 | | |
 | apps-bots-integrations-4 | echo-bot entry check never matches on Windows | a7814c53 | | |
 | apps-bots-integrations-6 | Autocomplete choices validated only by count | bba6b6b9 | yes | yes |
-| server-messages-threads-3 | Rejected send still starts slowmode | 9b5a06bd | | |
-| server-messages-threads-6 | Poll answer custom emoji only shape-checked (row in section 2, whose Commit cell predates the sha) | 42892c41 | yes | yes |
+| server-messages-threads-3 | Rejected send still starts slowmode (a send that fails after its message was stored keeps the slot) | 9b5a06bd, 097536c4 | | |
+| server-messages-threads-6 | Poll answer custom emoji only shape-checked | 42892c41 | yes | yes |
 | tauri-host-6 | Upload Preview does nothing in the desktop app (now web-only) | 38361418 | | |
 | tauri-host-7 | Prefs, window state and crash marker written non-atomically | 8158a5bd | | |
 | tauri-host-9 | Stale app_dirs and unsafe_code comments | 31046905 | | yes |
@@ -255,6 +255,9 @@ Branch `audit-followups` (on top of `main`, which holds the first round): 56 com
 | deps-ci-tests-docs-9 | Stale pnpm-lock.yaml tracked beside package-lock.json | 25d5153d | | |
 | deps-ci-tests-docs-10 | Docs cite commit hashes absent from public history | fbd85788 | | yes |
 | deps-ci-tests-docs-13 | VOKKO_SECRETS_KEY missing from the self-hosting reference | 17261810 | | yes |
+| CI: tauri job | Failed on main: native voice's alsa-sys and webrtc-sys need libasound2-dev and clang 21 (now from apt.llvm.org, key pinned by fingerprint), plus libdbus-1-dev | 32809b09 | | |
+| CI: e2e job | Cancelled on main: the single-worker suite (about 31 min) exceeded the 30 min timeout; now four shards of 20 min. Check names become `e2e (1)` to `e2e (4)` | 32144b58 | | |
+| advisories | rustls 0.23.45 to 0.23.46 (RUSTSEC-2026-0346 to -0349) | 9879b88a | | |
 
 Scope limits the fixers noted:
 - **server-auth-accounts-2:** no regression test for the reset/edit ordering (holding all 4 hash slots would starve parallel tests); the `hash_slot` unit test covers the 429.
@@ -267,7 +270,7 @@ Scope limits the fixers noted:
 
 ### Not fixed or reverted
 
-None. Every item handed to a fixer landed. Three (server-auth-accounts-2, server-guild-permissions-1, deploy-config-secrets-6) needed a second commit after review.
+None. Every item handed to a fixer landed. Three (server-auth-accounts-2, server-guild-permissions-1, deploy-config-secrets-6) needed a second commit after review, and a security review of the branch found three regressions that 88c716ce, 9b032200 and 097536c4 fix: the cooldown check and the new link were not atomic (two concurrent resends both mailed), a forward copied files before the rules, verification and slowmode gates, and the slowmode slot was given back even when the insert had committed. Its review of those fixes closed two cancellation holes in the forward copy guard (b8c5d7ac).
 
 ### Low findings refuted in triage
 
@@ -279,7 +282,9 @@ None. Every item handed to a fixer landed. Three (server-auth-accounts-2, server
 
 ### Unix verification
 
-Not finished. The check on a macOS machine was still building the server when this report was written, so the SIGTERM handling (2f7b7824) and the native-voice output switch (751549fb, Linux only) remain unverified on Unix.
+Both confirmed, on a macOS machine and a Linux arm64 container on it.
+- **SIGTERM (2f7b7824):** natively, the server exits 0 within milliseconds on SIGTERM and SIGINT (the previous build died from SIGTERM, status 143). In Docker, `docker stop` now takes 0.14 s with exit code 0; the previous build ignored SIGTERM as PID 1 and was killed after the 10 s grace period (137).
+- **Native voice output switch (751549fb):** `cargo test -p vokko-desktop` passes on Linux (75 passed, 2 ignored), and the `live_room` harness against a local LiveKit server passed three runs that switch the output device (to missing devices, while muted, back to default). The server always saw one microphone publication, none while muted, never two. Real macOS devices were not tested: the module is Linux only.
 
 ### Suite results (follow-up branch, Windows)
 
@@ -287,12 +292,12 @@ Not finished. The check on a macOS machine was still building the server when th
 |---|---|
 | `cargo fmt --check` | pass |
 | clippy (server, protocol, engine, platform, cli; `-D warnings`) | pass |
-| Rust tests (same crates, test database) | pass: 65 binaries, 840 passed, 0 failed, 2 ignored |
+| Rust tests (same crates, test database) | pass: 64 binaries, 845 passed, 0 failed, 2 ignored |
 | `cargo xtask layers` | pass |
 | `cargo xtask privacy` | pass (18 patterns, contents and file names) |
 | UI build (`npm run build`) | pass |
 | vitest | pass: 231 files, 2122 tests |
-| Playwright e2e | fail: 814 passed, 1 failed, 70 skipped. `e2e/voice-ui.spec.ts:172` timed out in `openGuild` late in the 31.5 min single-worker run; the spec alone passes (14 passed, 2 skipped), so it looks like a timing flake |
+| Playwright e2e (four shards, as CI now runs it) | pass: 815 passed, 0 failed, 70 skipped; shards took 6.4, 8.3, 7.8 and 7.5 min. An earlier single 31.5 min run had one timeout in `e2e/voice-ui.spec.ts:172` that passed alone |
 | Tauri crate build | pass |
 | clippy and tests: xtask, vokko-loadtest | pass (16 tests) |
 | `cargo test -p vokko-desktop` | pass (68 tests) |
@@ -300,8 +305,8 @@ Not finished. The check on a macOS machine was still building the server when th
 | tests: spotify-bot, stremio-bot | spotify-bot pass (3); stremio-bot does not link on Windows (LNK2038, C runtime mismatch in livekit's prebuilt libwebrtc). CI runs this job on Linux, advisory |
 | echo-bot `npm test` | pass (4) |
 | integrations/ai-bridge (bun install, typecheck, test) | pass (123) |
-| integrations/claude-channel (bun install, typecheck, test) | pass (61, 4 skipped) |
-| `cargo audit` (advisory job) | fail: 19 vulnerabilities (rustls, rustls-webpki, zip, quick-xml, rsa, glib and others, mostly in the Tauri and bot trees) |
+| integrations/claude-channel (bun install, typecheck, test) | pass (61, 4 skipped; typecheck rerun after the last fixes) |
+| `cargo audit` (advisory job) | fail: 15 vulnerabilities after 9879b88a (was 19). Left: rustls 0.22 / rustls-webpki 0.102 / quick-xml 0.38 via the librespot fork (spotify-bot only), rsa (no fix; the server only verifies RS256), zip via tauri-plugin-updater (fix only in 3.0 alpha; updates are signature-checked first) and webrtc-sys-build (build time) |
 | `npm audit --omit=dev --audit-level=high` (advisory job) | fail: 10 (5 high, from boardgame.io's server-side koa/socket.io/ws dependencies; the only fix is a breaking downgrade) |
 
 The Ubuntu-only CI setup (apt webkit/glib, `npx playwright install --with-deps`) and the CI privacy secret could not be reproduced here.
@@ -310,7 +315,6 @@ The Ubuntu-only CI setup (apt webkit/glib, `npx playwright install --with-deps`)
 
 - **Section 4:** gateway-realtime-4 (events lost while READY builds), storage-sql-migrations-2 (mentions index and query), and the undecided client-ui-rendering-perf-4 and tauri-host-5.
 - **Section 6, left by class:** risky: server-guild-permissions-3, storage-sql-migrations-7. Product decision: apps-bots-integrations-5, server-messages-threads-4, server-messages-threads-5, server-auth-accounts-8, deps-ci-tests-docs-12, deps-ci-tests-docs-14.
-- **Unix verification** (above).
 - **Repository settings:** add the `privacy` job and the new blocking jobs to required checks if branch protection lists them.
-- **Advisories:** the cargo and npm audit findings above; the media-bots job has not run on Linux CI yet.
+- **Advisories:** the cargo and npm audit findings above (the spotify-bot ones need the librespot fork updated); the media-bots, tauri and sharded e2e jobs have not run on CI yet.
 - **Flaky e2e:** `e2e/block-confirm.spec.ts:139` ("an older page that holds folded runs does not move the list"; about 6/48 at 16 workers on the original code too, likely an app bug in folded-row handling) and `e2e/voice-ui.spec.ts:172`.
