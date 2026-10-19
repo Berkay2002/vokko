@@ -21,3 +21,5 @@ __pycache__/
 *.pyc
 /apps/desktop/release.production.json
 /deploy/media-livekit.local.yaml
+pnpm-lock.yaml
+yarn.lock
