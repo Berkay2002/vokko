@@ -559,6 +559,9 @@ async fn wrong_codes_are_limited_per_account_across_tickets() {
     let (_, step) = login(&app, "hammered", "correct horse battery").await;
     let (status, error) = app.send(Method::POST, "/auth/mfa/totp", None, Some(json!({"ticket": step["ticket"], "code": backup}))).await;
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{error}");
+    // a RateLimitError (with Retry-After) counting down to when the oldest failure leaves the window, keeping its message
+    assert!(error["retry_after"].as_f64().is_some_and(|wait| wait > 600.0 && wait <= 900.0), "{error}");
+    assert_eq!(error["message"], "Too many wrong codes. Try again in 15 minutes.");
     assert_eq!(app.post("/users/@me/mfa/totp/disable", &token, json!({"code": backup})).await.0, StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(app.post("/users/@me/delete", &token, json!({"password": "correct horse battery", "code": backup})).await.0, StatusCode::TOO_MANY_REQUESTS);
     // the backup code was never spent by the refused attempts

@@ -121,7 +121,16 @@ pub(super) async fn begin_attempt(state: &AppState, table: &str, user_id: i64, r
     if attempts > MAX_FAILURES {
         // a refused request is not an attempt: it must not keep extending the lockout
         sqlx::query(&format!("DELETE FROM {table} WHERE id = $1")).bind(attempt).execute(&state.db).await?;
-        return Err(ApiErr { status: StatusCode::TOO_MANY_REQUESTS, body: ApiError { code: 0, message: refused.to_owned(), errors: None }, retry_after: None });
+        // the oldest counted failure leaving the window: exact at MAX_FAILURES + 1, a lower bound past that
+        let (left,): (Option<f64>,) = sqlx::query_as(&format!(
+            "SELECT EXTRACT(EPOCH FROM (min(failed_at) + make_interval(secs => $2) - now()))::float8 FROM {table} WHERE user_id = $1 AND failed_at > now() - make_interval(secs => $2)"
+        ))
+        .bind(user_id)
+        .bind(FAILURE_WINDOW_SECONDS)
+        .fetch_one(&state.db)
+        .await?;
+        let retry_after = Some(left.unwrap_or(1.0).max(1.0));
+        return Err(ApiErr { status: StatusCode::TOO_MANY_REQUESTS, body: ApiError { code: 0, message: refused.to_owned(), errors: None }, retry_after });
     }
     Ok(attempt)
 }
