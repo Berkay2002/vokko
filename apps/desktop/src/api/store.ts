@@ -478,9 +478,10 @@ export function wireStoreToGateway(): void {
     if (lost) openModal({ type: "guildGone", name: lost.name });
   });
   gateway.on("GUILD_MEMBER_UPDATE", ({ guild_id, ...member }) => {
+    // The event carries the full member and omits false/0 defaults (mute, deaf, flags), so replace the entry: a merge would keep a stale `true`.
     const state = s();
     const known = state.members[guild_id] ?? {};
-    appStore.setState({ members: { ...state.members, [guild_id]: { ...known, [member.user.id]: { ...known[member.user.id], ...member } } } });
+    appStore.setState({ members: { ...state.members, [guild_id]: { ...known, [member.user.id]: member } } });
     state.cacheUsers([member.user]);
   });
   // The Bans page refetches on open; nothing to keep in the store.
