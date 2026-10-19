@@ -531,7 +531,7 @@ Gateway `GUILD_JOIN_REQUEST_CREATE` / `GUILD_JOIN_REQUEST_UPDATE` `{guild_id, st
 3. Server dispatches `READY` (op 0, `s` increments per dispatch).
 4. Client sends `op 1 Heartbeat {d: last_seq}` every interval; server replies `op 11`. Missing two heartbeats → server closes 4009.
 5. `op 4 VoiceStateUpdate {guild_id, channel_id, self_mute, self_deaf, self_video}` joins, moves, leaves (`channel_id: null`) or toggles self mute/deafen (see Voice).
-6. `op 6 Resume {token, session_id, seq}` replays missed dispatches if the session buffer still has them; otherwise `op 9 InvalidSession`, and the client re-identifies.
+6. `op 6 Resume {token, session_id, seq}` replays missed dispatches if the session buffer still has them and the session has been without a connection for less than 5 minutes; otherwise `op 9 InvalidSession`, and the client re-identifies.
 
 Events are delivered only to users who can see the channel/guild. Event names and payloads: `GatewayEvents` in types.ts. Presence: connected → online, last connection closed → offline; `op 3 {status, custom_status, activities?}` updates it (custom_status max 128 chars; `activities` below). The chosen status and custom_status are kept across disconnects; activities are cleared when the reporting connection closes (see Presence status below). Close codes and gateway limits: see Limits and abuse controls below.
 

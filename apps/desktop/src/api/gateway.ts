@@ -196,8 +196,9 @@ class GatewayClient {
       case GatewayOp.Hello: {
         this.clearHelloTimer();
         const interval = (payload.d as { heartbeat_interval: number }).heartbeat_interval;
-        this.startHeartbeat(interval);
+        // Measured before startHeartbeat, which resets lastAckAt.
         const fresh = Date.now() - this.lastAckAt < RESUME_WINDOW_MS;
+        this.startHeartbeat(interval);
         if (this.sessionId && this.seq != null && fresh) this.send(GatewayOp.Resume, { token: this.token, session_id: this.sessionId, seq: this.seq });
         else {
           this.sessionId = null;

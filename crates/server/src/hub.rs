@@ -331,6 +331,17 @@ impl Hub {
         lock(&self.sessions).get(id).cloned()
     }
 
+    /// A session a Resume may continue: one detached for `ttl` or longer is forgotten here and reads as missing.
+    pub fn resumable_session(&self, id: &str) -> Option<Arc<Session>> {
+        let mut sessions = lock(&self.sessions);
+        let expired = sessions.get(id)?.detached_for().is_some_and(|detached| detached >= self.ttl);
+        if expired {
+            sessions.remove(id);
+            return None;
+        }
+        sessions.get(id).cloned()
+    }
+
     pub fn remove_session(&self, id: &str) {
         lock(&self.sessions).remove(id);
     }
@@ -531,6 +542,17 @@ mod tests {
         let (again, mut resumed) = hub.new_link();
         assert!(matches!(session.resume(again, 1, ("RESUMED", Value::Null)), ResumeOutcome::Resumed { replayed: 0, .. }));
         assert!(resumed.queue.try_recv().is_ok_and(|text| text.contains("\"s\":2")));
+    }
+
+    #[test]
+    fn a_session_detached_past_the_ttl_is_not_resumable() {
+        let hub = Hub::new(100, Duration::ZERO, 8);
+        let session = hub.create_session(1, "s".to_owned(), vec![1]);
+        let (link, _receiver) = hub.new_link();
+        let generation = session.attach(link);
+        assert!(hub.resumable_session("s").is_some(), "an attached session never expires");
+        assert!(session.detach(generation));
+        assert!(hub.resumable_session("s").is_none() && hub.session("s").is_none(), "the expired session is forgotten");
     }
 
     fn hub(queue: usize) -> Hub {

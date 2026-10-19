@@ -229,8 +229,8 @@ async fn handshake(state: &AppState, writer: &mut Writer, stream: &mut Stream, l
                     failed_resumes += 1;
                     continue;
                 };
-                // Unknown session ids (128-bit random) are answered without a database lookup.
-                let session = state.hub.session(&resume.session_id);
+                // Unknown or expired session ids (128-bit random) are answered without a database lookup.
+                let session = state.hub.resumable_session(&resume.session_id);
                 let owner = match &session {
                     Some(_) => user_for_token(state, &resume.token).await.ok().flatten(),
                     None => None,
