@@ -391,7 +391,6 @@ Rows are deleted 30 days after they were sent.
 
 ## Not production-ready yet
 
-- Only the Postgres service in `deploy/docker-compose.yml` has a healthcheck; the server service has none. `GET /healthz` (see above) is the check to point one at.
 - Voice, video, screen share and DM calls need the LiveKit server described under Voice (LiveKit); without it those features are unavailable and text chat still works.
 - Per-address limits treat an IPv6 /64 as one client (a single host usually holds a whole /64). Devices on one IPv6 LAN, or clients behind a NAT64 gateway (`64:ff9b::/96`), therefore share the login limit and the 16 unidentified gateway sockets, as devices behind one IPv4 NAT do.
 - Reports of DM messages (Report Message in a DM) have no guild, so no moderator sees them in the app: they are kept in the `reports` table with `guild_id IS NULL` until you delete them (`SELECT * FROM reports WHERE guild_id IS NULL AND status = 'open'`; close one with `UPDATE reports SET status = 'resolved', closed_at = now() WHERE id = ...`). Each keeps the reported text, also after the author deletes it or their account.
