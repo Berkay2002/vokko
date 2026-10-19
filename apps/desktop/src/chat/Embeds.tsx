@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { MailX, Play, Users, X } from 'lucide-react';
 import type { Attachment, Embed, Message, Snowflake } from '../api/types';
-import { AnimatedImage, AnimatedVideo, guildIconUrl, guildInitials, joinOrApply, request, resolveUrl, useGuilds } from './shell';
+import { AnimatedImage, AnimatedVideo, ApiRequestError, guildIconUrl, guildInitials, joinOrApply, request, resolveUrl, useGuilds } from './shell';
 import { useChat } from './ChatContext';
 import { Markdown } from './markdown';
 import { embedColor, findInviteCodes, isVideoUrl, safeHttpUrl } from './embedUtil';
@@ -31,7 +31,11 @@ const inviteCache = new Map<string, Promise<InviteInfo | null>>();
 function loadInvite(code: string): Promise<InviteInfo | null> {
   let p = inviteCache.get(code);
   if (!p) {
-    p = request<InviteInfo>('GET', `/invites/${encodeURIComponent(code)}`).catch(() => null);
+    // only "Unknown Invite" (404) is final; a network error, 429 or 5xx is dropped so the next embed mount asks again
+    p = request<InviteInfo>('GET', `/invites/${encodeURIComponent(code)}`).catch(e => {
+      if (!(e instanceof ApiRequestError && e.status === 404)) inviteCache.delete(code);
+      return null;
+    });
     inviteCache.set(code, p);
   }
   return p;
