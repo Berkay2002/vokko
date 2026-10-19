@@ -630,6 +630,8 @@ async fn create_channel(
             if found.is_none() {
                 return Err(ApiErr::invalid("parent_id", "Must be a category of this guild."));
             }
+            // A category the caller cannot see is not theirs to put channels into (or to copy overwrites from).
+            access::channel_access(&state, user_id, parent.db()).await?;
             Some(parent.db())
         }
         _ => None,
