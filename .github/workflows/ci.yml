@@ -44,7 +44,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: fmt
         run: cargo fmt --check
       - name: clippy
@@ -102,7 +102,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libglib2.0-dev
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: clippy
         run: cargo clippy -p spotify-bot -p stremio-bot --all-targets -- -D warnings
       - name: test
@@ -212,7 +212,7 @@ jobs:
       - name: build ui
         working-directory: apps/desktop
         run: npm run build
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: build tauri crate
         run: cargo build -p vokko-desktop
       - name: test tauri crate
